@@ -367,7 +367,7 @@ func (i *Initializer) setupDefaultTunnelInterface(tunnelPortName string) error {
 // initNodeLocalConfig retrieves node's subnet CIDR from node.spec.PodCIDR, which is used for IPAM and setup
 // host gateway interface.
 func (i *Initializer) initNodeLocalConfig() error {
-	nodeName, err := getNodeName()
+	nodeName, err := GetNodeName()
 	if err != nil {
 		return err
 	}
@@ -392,10 +392,10 @@ func (i *Initializer) initNodeLocalConfig() error {
 	return nil
 }
 
-// getNodeName returns the node's name used in Kubernetes, based on the priority:
+// GetNodeName returns the node's name used in Kubernetes, based on the priority:
 // - Environment variable NODE_NAME, which should be set by Downward API
 // - OS's hostname
-func getNodeName() (string, error) {
+func GetNodeName() (string, error) {
 	nodeName := os.Getenv(NodeNameEnvKey)
 	if nodeName != "" {
 		return nodeName, nil

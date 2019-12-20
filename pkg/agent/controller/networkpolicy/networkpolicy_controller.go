@@ -62,7 +62,7 @@ type Controller struct {
 	ruleCache *ruleCache
 	// reconciler provides interfaces to reconcile the desired state of
 	// NetworkPolicy rules with the actual state of Openflow entries.
-	reconciler Reconciler
+	Reconciler Reconciler
 	// networkPolicyWatcherConnected maintains the connection status between NetworkPolicyWatcher and Controller.
 	networkPolicyWatcherConnected bool
 	// appliedToGroupWatcherConnected maintains the connection status between appliedToGroupWatcher and Controller.
@@ -81,7 +81,7 @@ func NewNetworkPolicyController(antreaClient versioned.Interface,
 		antreaClient: antreaClient,
 		nodeName:     nodeName,
 		queue:        workqueue.NewNamedRateLimitingQueue(workqueue.NewItemExponentialFailureRateLimiter(minRetryDelay, maxRetryDelay), "networkpolicyrule"),
-		reconciler:   newReconciler(ofClient, ifaceStore),
+		Reconciler:   newReconciler(ofClient, ifaceStore),
 	}
 	c.ruleCache = newRuleCache(c.enqueueRule, podUpdates)
 	c.networkPolicyWatcherConnected = true
@@ -159,7 +159,7 @@ func (c *Controller) syncRule(key string) error {
 	rule, exists, completed := c.ruleCache.GetCompletedRule(key)
 	if !exists {
 		klog.V(2).Infof("Rule %v had been deleted, removing its flows", key)
-		if err := c.reconciler.Forget(key); err != nil {
+		if err := c.Reconciler.Forget(key); err != nil {
 			return err
 		}
 		return nil
@@ -170,7 +170,7 @@ func (c *Controller) syncRule(key string) error {
 		klog.V(2).Infof("Rule %v was not complete, skipping", key)
 		return nil
 	}
-	if err := c.reconciler.Reconcile(rule); err != nil {
+	if err := c.Reconciler.Reconcile(rule); err != nil {
 		return err
 	}
 	return nil

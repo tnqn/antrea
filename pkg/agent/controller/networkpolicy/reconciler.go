@@ -64,6 +64,18 @@ type lastRealized struct {
 	podIPs sets.String
 }
 
+type NoopReconciler struct{}
+
+func (r *NoopReconciler) Reconcile(rule *CompletedRule) error {
+	klog.Infof("Reconciling rule %v", rule)
+	return nil
+}
+
+func (r *NoopReconciler) Forget(ruleID string) error {
+	klog.Infof("Forgetting rule %v", ruleID)
+	return nil
+}
+
 // reconciler implements Reconciler.
 // Note that although its Reconcile and Forget methods are thread-safe, it's
 // assumed each rule can only be processed by a single client at any given

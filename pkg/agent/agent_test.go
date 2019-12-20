@@ -51,7 +51,7 @@ func compareNodeName(k, v string, t *testing.T) {
 		_ = os.Setenv(NodeNameEnvKey, k)
 		defer os.Unsetenv(NodeNameEnvKey)
 	}
-	nodeName, err := getNodeName()
+	nodeName, err := GetNodeName()
 	if err != nil {
 		t.Errorf("Failure with expected name %s, %v", k, err)
 		return

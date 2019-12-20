@@ -40,9 +40,32 @@ import (
 // Same as in https://github.com/kubernetes/sample-controller/blob/master/main.go
 const informerDefaultResync time.Duration = 30 * time.Second
 
+func dryRun(o *Options) error {
+	antreaClient, err := agent.CreateAntreaClient(o.config.AntreaClientConnection)
+	if err != nil {
+		return fmt.Errorf("error creating Antrea client: %v", err)
+	}
+	nodeName, err := agent.GetNodeName()
+	if err != nil {
+		return fmt.Errorf("error getting Node name: %v", err)
+	}
+	networkPolicyController := networkpolicy.NewNetworkPolicyController(antreaClient, nil, nil, nodeName, nil)
+	networkPolicyController.Reconciler = &networkpolicy.NoopReconciler{}
+
+	stopCh := signals.RegisterSignalHandlers()
+	networkPolicyController.Run(stopCh)
+
+	<-stopCh
+	klog.Info("Stopping Antrea agent")
+	return nil
+}
+
 // run starts Antrea agent with the given options and waits for termination signal.
 func run(o *Options) error {
 	klog.Infof("Starting Antrea agent (version %s)", version.GetFullVersion())
+	if o.dryRun {
+		return dryRun(o)
+	}
 	// Create K8s Clientset, CRD Clientset and SharedInformerFactory for the given config.
 	k8sClient, crdClient, err := k8s.CreateClients(o.config.ClientConnection)
 	if err != nil {
