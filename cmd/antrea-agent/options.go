@@ -47,6 +47,7 @@ type Options struct {
 	configFile string
 	// The configuration object
 	config *AgentConfig
+	dryRun bool
 }
 
 func newOptions() *Options {
@@ -58,6 +59,7 @@ func newOptions() *Options {
 // addFlags adds flags to fs and binds them to options.
 func (o *Options) addFlags(fs *pflag.FlagSet) {
 	fs.StringVar(&o.configFile, "config", o.configFile, "The path to the configuration file")
+	fs.BoolVar(&o.dryRun, "dry-run", o.dryRun, "If true, do not make any dataplane changes")
 }
 
 // complete completes all the required options.
