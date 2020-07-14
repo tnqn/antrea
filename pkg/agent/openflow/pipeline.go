@@ -54,6 +54,7 @@ const (
 	ApplicationEgressRuleTable  binding.TableIDType = 49
 	EgressRuleTable             binding.TableIDType = 50
 	EgressDefaultTable          binding.TableIDType = 60
+	EgressMetricTable           binding.TableIDType = 61
 	l3ForwardingTable           binding.TableIDType = 70
 	l2ForwardingCalcTable       binding.TableIDType = 80
 	EmergencyIngressRuleTable   binding.TableIDType = 85
@@ -63,6 +64,7 @@ const (
 	ApplicationIngressRuleTable binding.TableIDType = 89
 	IngressRuleTable            binding.TableIDType = 90
 	IngressDefaultTable         binding.TableIDType = 100
+	IngressMetricTable          binding.TableIDType = 101
 	conntrackCommitTable        binding.TableIDType = 105
 	hairpinSNATTable            binding.TableIDType = 106
 	L2ForwardingOutTable        binding.TableIDType = 110
@@ -86,6 +88,16 @@ const (
 )
 
 var (
+	egressTables = map[binding.TableIDType]struct{}{
+		EmergencyEgressRuleTable:   {},
+		SecurityOpsEgressRuleTable: {},
+		NetworkOpsEgressRuleTable:  {},
+		PlatformEgressRuleTable:    {},
+		ApplicationEgressRuleTable: {},
+		EgressRuleTable:            {},
+		EgressDefaultTable:         {},
+	}
+
 	FlowTables = []struct {
 		Number binding.TableIDType
 		Name   string
@@ -108,6 +120,7 @@ var (
 		{ApplicationEgressRuleTable, "CNPApplicationEgressRule"},
 		{EgressRuleTable, "EgressRule"},
 		{EgressDefaultTable, "EgressDefaultRule"},
+		{EgressMetricTable, "EgressMetric"},
 		{l3ForwardingTable, "l3Forwarding"},
 		{l2ForwardingCalcTable, "L2Forwarding"},
 		{EmergencyIngressRuleTable, "CNPEmergencyIngressRule"},
@@ -117,6 +130,7 @@ var (
 		{ApplicationIngressRuleTable, "CNPApplicationIngressRule"},
 		{IngressRuleTable, "IngressRule"},
 		{IngressDefaultTable, "IngressDefaultRule"},
+		{IngressMetricTable, "IngressMetric"},
 		{conntrackCommitTable, "ConntrackCommit"},
 		{hairpinSNATTable, "HairpinSNATTable"},
 		{L2ForwardingOutTable, "Output"},
@@ -183,17 +197,17 @@ func (rt regType) reg() string {
 const (
 	// marksReg stores traffic-source mark and pod-found mark.
 	// traffic-source resides in [0..15], pod-found resides in [16].
-	marksReg        regType = 0
-	portCacheReg    regType = 1
-	swapReg         regType = 2
-	endpointIPReg   regType = 3               // Use reg3 to store endpoint IP
-	endpointPortReg regType = 4               // Use reg4[0..15] to store endpoint port
-	serviceLearnReg         = endpointPortReg // Use reg4[16..18] to store endpoint selection states.
-	EgressReg       regType = 5
-	IngressReg      regType = 6
-	TraceflowReg    regType = 9 // Use reg9[28..31] to store traceflow dataplaneTag.
-	// marksRegServiceNeedLB indicates a packet need to do service selection.
-	marksRegServiceNeedLB uint32 = 0b001
+	marksReg                regType = 0
+	portCacheReg            regType = 1
+	swapReg                 regType = 2
+	endpointIPReg           regType = 3               // Use reg3 to store endpoint IP
+	endpointPortReg         regType = 4               // Use reg4[0..15] to store endpoint port
+	serviceLearnReg                 = endpointPortReg // Use reg4[16..18] to store endpoint selection states.
+	EgressReg               regType = 5
+	IngressReg              regType = 6
+	TraceflowReg            regType = 9             // Use reg9[28..31] to store traceflow dataplaneTag.
+	cnpDropConjunctionIDReg         = endpointIPReg // marksRegServiceNeedLB indicates a packet need to do service selection.
+	marksRegServiceNeedLB   uint32  = 0b001
 	// marksRegServiceSelected indicates a packet has done service selection.
 	marksRegServiceSelected uint32 = 0b010
 	// marksRegServiceNeedLearn indicates a packet has done service selection and
@@ -206,6 +220,7 @@ const (
 	snatRequiredMark = 0b1
 	hairpinMark      = 0b1
 	macRewriteMark   = 0b1
+	cnpDropMark      = 0b1
 
 	gatewayCTMark = 0x20
 	snatCTMark    = 0x40
@@ -229,6 +244,7 @@ var (
 	// macRewriteMarkRange takes the 19th bit of register marksReg to indicate
 	// if the packet's MAC addresses need to be rewritten. Its value is 0x1 if yes.
 	macRewriteMarkRange = binding.Range{19, 19}
+	cnpDropMarkRange    = binding.Range{20, 20}
 	// endpointIPRegRange takes a 32-bit range of register endpointIPReg to store
 	// the selected Service Endpoint IP.
 	endpointIPRegRange = binding.Range{0, 31}
@@ -873,6 +889,47 @@ func (c *client) arpNormalFlow(category cookie.Category) binding.Flow {
 		Done()
 }
 
+func (c *client) conjunctionAllowMetricFlows(conjunctionID uint32, ingress bool) []binding.Flow {
+	metricTableID := IngressMetricTable
+	offset := 0
+	rng := binding.Range{0, 31}
+	if !ingress {
+		metricTableID = EgressMetricTable
+		offset = 32
+		rng = binding.Range{32, 63}
+	}
+	return []binding.Flow{
+		c.pipeline[metricTableID].BuildFlow(priorityNormal).MatchProtocol(binding.ProtocolIP).
+			MatchPriority(priorityNormal).
+			MatchCTStateNew(true).
+			MatchCTLabelRange(0, uint64(conjunctionID)<<offset, rng).
+			Action().GotoTable(c.pipeline[metricTableID].GetNext()).
+			Cookie(c.cookieAllocator.Request(cookie.Policy).Raw()).
+			Done(),
+		c.pipeline[metricTableID].BuildFlow(priorityNormal).MatchProtocol(binding.ProtocolIP).
+			MatchPriority(priorityNormal).
+			MatchCTStateNew(false).
+			MatchCTLabelRange(0, uint64(conjunctionID)<<offset, rng).
+			Action().GotoTable(c.pipeline[metricTableID].GetNext()).
+			Cookie(c.cookieAllocator.Request(cookie.Policy).Raw()).
+			Done(),
+	}
+}
+
+func (c *client) conjunctionDropMetricFlow(conjunctionID uint32, ingress bool) binding.Flow {
+	metricTableID := IngressMetricTable
+	if !ingress {
+		metricTableID = EgressMetricTable
+	}
+	return c.pipeline[metricTableID].BuildFlow(priorityNormal).MatchProtocol(binding.ProtocolIP).
+		MatchPriority(priorityNormal).
+		MatchRegRange(int(marksReg), cnpDropMark, cnpDropMarkRange).
+		MatchReg(int(cnpDropConjunctionIDReg), conjunctionID).
+		Action().Drop().
+		Cookie(c.cookieAllocator.Request(cookie.Policy).Raw()).
+		Done()
+}
+
 // conjunctionActionFlow generates the flow to jump to a specific table if policyRuleConjunction ID is matched. Priority of
 // conjunctionActionFlow is created at priorityLow for k8s network policies, and *priority assigned by PriorityAssigner for CNP.
 func (c *client) conjunctionActionFlow(conjunctionID uint32, tableID binding.TableIDType, nextTable binding.TableIDType, priority *uint16) binding.Flow {
@@ -883,14 +940,18 @@ func (c *client) conjunctionActionFlow(conjunctionID uint32, tableID binding.Tab
 		ofPriority = *priority
 	}
 	conjReg := IngressReg
-	if tableID == EgressRuleTable {
+	rng := binding.Range{0, 31}
+	if _, ok := egressTables[tableID]; ok {
 		conjReg = EgressReg
+		rng = binding.Range{32, 63}
 	}
 	return c.pipeline[tableID].BuildFlow(ofPriority).MatchProtocol(binding.ProtocolIP).
 		MatchConjID(conjunctionID).
 		MatchPriority(ofPriority).
 		Action().LoadRegRange(int(conjReg), conjunctionID, binding.Range{0, 31}). // Traceflow.
-		Action().GotoTable(nextTable).
+		Action().CT(true, nextTable, CtZone).
+		LoadToLabelRange(uint64(conjunctionID), &rng).
+		CTDone().
 		Cookie(c.cookieAllocator.Request(cookie.Policy).Raw()).
 		Done()
 }
@@ -898,10 +959,16 @@ func (c *client) conjunctionActionFlow(conjunctionID uint32, tableID binding.Tab
 // conjunctionActionFlow generates the flow to drop traffic if policyRuleConjunction ID is matched.
 func (c *client) conjunctionActionDropFlow(conjunctionID uint32, tableID binding.TableIDType, priority *uint16) binding.Flow {
 	ofPriority := *priority
+	metricTableID := IngressMetricTable
+	if _, ok := egressTables[tableID]; ok {
+		metricTableID = EgressMetricTable
+	}
 	return c.pipeline[tableID].BuildFlow(ofPriority).MatchProtocol(binding.ProtocolIP).
 		MatchConjID(conjunctionID).
 		MatchPriority(ofPriority).
-		Action().Drop().
+		Action().LoadRegRange(int(cnpDropConjunctionIDReg), conjunctionID, binding.Range{0, 31}).
+		Action().LoadRegRange(int(marksReg), cnpDropMark, cnpDropMarkRange).
+		Action().GotoTable(metricTableID).
 		Cookie(c.cookieAllocator.Request(cookie.Policy).Raw()).
 		Done()
 }
@@ -1346,29 +1413,32 @@ func generatePipeline(bridge binding.Bridge, enableProxy, enableAntreaNP bool) m
 			serviceLBTable:        bridge.CreateTable(serviceLBTable, endpointDNATTable, binding.TableMissActionNext),
 			endpointDNATTable:     bridge.CreateTable(endpointDNATTable, egressEntryTable, binding.TableMissActionNext),
 			EgressRuleTable:       bridge.CreateTable(EgressRuleTable, EgressDefaultTable, binding.TableMissActionNext),
-			EgressDefaultTable:    bridge.CreateTable(EgressDefaultTable, l3ForwardingTable, binding.TableMissActionNext),
+			EgressDefaultTable:    bridge.CreateTable(EgressDefaultTable, EgressMetricTable, binding.TableMissActionNext),
+			EgressMetricTable:     bridge.CreateTable(EgressMetricTable, l3ForwardingTable, binding.TableMissActionNext),
 			l3ForwardingTable:     bridge.CreateTable(l3ForwardingTable, l2ForwardingCalcTable, binding.TableMissActionNext),
 			l2ForwardingCalcTable: bridge.CreateTable(l2ForwardingCalcTable, IngressEntryTable, binding.TableMissActionNext),
 			IngressRuleTable:      bridge.CreateTable(IngressRuleTable, IngressDefaultTable, binding.TableMissActionNext),
-			IngressDefaultTable:   bridge.CreateTable(IngressDefaultTable, conntrackCommitTable, binding.TableMissActionNext),
+			IngressDefaultTable:   bridge.CreateTable(IngressDefaultTable, IngressMetricTable, binding.TableMissActionNext),
+			IngressMetricTable:    bridge.CreateTable(IngressMetricTable, conntrackCommitTable, binding.TableMissActionNext),
 			conntrackCommitTable:  bridge.CreateTable(conntrackCommitTable, hairpinSNATTable, binding.TableMissActionNext),
 			hairpinSNATTable:      bridge.CreateTable(hairpinSNATTable, L2ForwardingOutTable, binding.TableMissActionNext),
 			L2ForwardingOutTable:  bridge.CreateTable(L2ForwardingOutTable, binding.LastTableID, binding.TableMissActionDrop),
 		}
 	} else {
 		pipeline = map[binding.TableIDType]binding.Table{
-			ClassifierTable:       bridge.CreateTable(ClassifierTable, spoofGuardTable, binding.TableMissActionDrop),
-			spoofGuardTable:       bridge.CreateTable(spoofGuardTable, conntrackTable, binding.TableMissActionDrop),
-			arpResponderTable:     bridge.CreateTable(arpResponderTable, binding.LastTableID, binding.TableMissActionDrop),
-			conntrackTable:        bridge.CreateTable(conntrackTable, conntrackStateTable, binding.TableMissActionNone),
-			conntrackStateTable:   bridge.CreateTable(conntrackStateTable, dnatTable, binding.TableMissActionNext),
-			dnatTable:             bridge.CreateTable(dnatTable, egressEntryTable, binding.TableMissActionNext),
-			EgressRuleTable:       bridge.CreateTable(EgressRuleTable, EgressDefaultTable, binding.TableMissActionNext),
-			EgressDefaultTable:    bridge.CreateTable(EgressDefaultTable, l3ForwardingTable, binding.TableMissActionNext),
-			l3ForwardingTable:     bridge.CreateTable(l3ForwardingTable, l2ForwardingCalcTable, binding.TableMissActionNext),
+			ClassifierTable:     bridge.CreateTable(ClassifierTable, spoofGuardTable, binding.TableMissActionDrop),
+			spoofGuardTable:     bridge.CreateTable(spoofGuardTable, conntrackTable, binding.TableMissActionDrop),
+			arpResponderTable:   bridge.CreateTable(arpResponderTable, binding.LastTableID, binding.TableMissActionDrop),
+			conntrackTable:      bridge.CreateTable(conntrackTable, conntrackStateTable, binding.TableMissActionNone),
+			conntrackStateTable: bridge.CreateTable(conntrackStateTable, dnatTable, binding.TableMissActionNext),
+			dnatTable:           bridge.CreateTable(dnatTable, egressEntryTable, binding.TableMissActionNext),
+			EgressRuleTable:     bridge.CreateTable(EgressRuleTable, EgressDefaultTable, binding.TableMissActionNext),
+			EgressDefaultTable:  bridge.CreateTable(EgressDefaultTable, EgressMetricTable, binding.TableMissActionNext),
+			EgressMetricTable:   bridge.CreateTable(EgressMetricTable, l3ForwardingTable, binding.TableMissActionNext), l3ForwardingTable: bridge.CreateTable(l3ForwardingTable, l2ForwardingCalcTable, binding.TableMissActionNext),
 			l2ForwardingCalcTable: bridge.CreateTable(l2ForwardingCalcTable, IngressEntryTable, binding.TableMissActionNext),
 			IngressRuleTable:      bridge.CreateTable(IngressRuleTable, IngressDefaultTable, binding.TableMissActionNext),
-			IngressDefaultTable:   bridge.CreateTable(IngressDefaultTable, conntrackCommitTable, binding.TableMissActionNext),
+			IngressDefaultTable:   bridge.CreateTable(IngressDefaultTable, IngressMetricTable, binding.TableMissActionNext),
+			IngressMetricTable:    bridge.CreateTable(IngressMetricTable, conntrackCommitTable, binding.TableMissActionNext),
 			conntrackCommitTable:  bridge.CreateTable(conntrackCommitTable, L2ForwardingOutTable, binding.TableMissActionNext),
 			L2ForwardingOutTable:  bridge.CreateTable(L2ForwardingOutTable, binding.LastTableID, binding.TableMissActionDrop),
 		}

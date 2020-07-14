@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"net"
 	"strconv"
+	"strings"
 
 	"k8s.io/klog"
 
@@ -26,6 +27,7 @@ import (
 	secv1alpha1 "github.com/vmware-tanzu/antrea/pkg/apis/security/v1alpha1"
 	binding "github.com/vmware-tanzu/antrea/pkg/ovs/openflow"
 	metricsv1alpha1 "github.com/vmware-tanzu/antrea/pkg/apis/metrics/v1alpha1"
+	"github.com/vmware-tanzu/antrea/pkg/ovs/ovsctl"
 )
 
 const (
@@ -451,6 +453,7 @@ type policyRuleConjunction struct {
 	toClause      *clause
 	serviceClause *clause
 	actionFlows   []binding.Flow
+	metricFlows   []binding.Flow
 	// NetworkPolicy name and Namespace information for debugging usage.
 	npName      string
 	npNamespace string
@@ -723,6 +726,9 @@ func (c *client) InstallPolicyRuleFlows(rule *types.PolicyRule) error {
 	defer c.conjMatchFlowLock.Unlock()
 	ctxChanges := c.calculateMatchFlowChangesForRule(conj, rule, false)
 
+	if err := c.ofEntryOperations.AddAll(conj.metricFlows); err != nil {
+		return err
+	}
 	if err := c.ofEntryOperations.AddAll(conj.actionFlows); err != nil {
 		return err
 	}
@@ -749,6 +755,8 @@ func (c *client) calculateActionFlowChangesForRule(rule *types.PolicyRule) *poli
 		npNamespace: rule.PolicyNamespace}
 	nClause, ruleTable, dropTable := conj.calculateClauses(rule, c)
 	conj.ruleTableID = rule.TableID
+	_, isEgress := egressTables[rule.TableID]
+	isIngress := !isEgress
 
 	// Conjunction action flows are installed only if the number of clauses in the conjunction is > 1. It should be a rule
 	// to drop all packets.  If the number is 1, no conjunctive match flows or conjunction action flows are installed,
@@ -756,12 +764,16 @@ func (c *client) calculateActionFlowChangesForRule(rule *types.PolicyRule) *poli
 	if nClause > 1 {
 		// Install action flows.
 		var actionFlows []binding.Flow
+		var metricFlows []binding.Flow
 		if rule.IsAntreaNetworkPolicyRule() && *rule.Action == secv1alpha1.RuleActionDrop {
+			metricFlows = append(metricFlows, c.conjunctionDropMetricFlow(ruleID, isIngress))
 			actionFlows = append(actionFlows, c.conjunctionActionDropFlow(ruleID, ruleTable.GetID(), rule.Priority))
 		} else {
+			metricFlows = append(metricFlows, c.conjunctionAllowMetricFlows(ruleID, isIngress)...)
 			actionFlows = append(actionFlows, c.conjunctionActionFlow(ruleID, ruleTable.GetID(), dropTable.GetNext(), rule.Priority))
 		}
 		conj.actionFlows = actionFlows
+		conj.metricFlows = metricFlows
 	}
 	return conj
 }
@@ -788,18 +800,19 @@ func (c *client) BatchInstallPolicyRuleFlows(ofPolicyRules []*types.PolicyRule) 
 	defer c.replayMutex.RUnlock()
 
 	var allCtxChanges []*conjMatchFlowContextChange
-	var allActionFlowChanges []binding.Flow
+	var allFlows []binding.Flow
 	var updatedConjunctions []*policyRuleConjunction
 
 	for _, rule := range ofPolicyRules {
 		conj := c.calculateActionFlowChangesForRule(rule)
 		ctxChanges := c.calculateMatchFlowChangesForRule(conj, rule, true)
-		allActionFlowChanges = append(allActionFlowChanges, conj.actionFlows...)
+		allFlows = append(allFlows, conj.actionFlows...)
+		allFlows = append(allFlows, conj.metricFlows...)
 		allCtxChanges = append(allCtxChanges, ctxChanges...)
 		updatedConjunctions = append(updatedConjunctions, conj)
 	}
 	// Send the changed Openflow entries to the OVS bridge.
-	if err := c.sendConjunctiveFlows(allCtxChanges, allActionFlowChanges); err != nil {
+	if err := c.sendConjunctiveFlows(allCtxChanges, allFlows); err != nil {
 		return err
 	}
 	// Update conjMatchFlowContexts as the expected status.
@@ -824,10 +837,10 @@ func (c *client) applyConjunctiveMatchFlows(flowChanges []*conjMatchFlowContextC
 }
 
 // sendConjunctiveFlows sends all the changed OpenFlow entries to the OVS bridge in a single Bundle.
-func (c *client) sendConjunctiveFlows(changes []*conjMatchFlowContextChange, actionFlows []binding.Flow) error {
+func (c *client) sendConjunctiveFlows(changes []*conjMatchFlowContextChange, flows []binding.Flow) error {
 	var addFlows, modifyFlows, deleteFlows []binding.Flow
 	var flowChanges []*flowChange
-	addFlows = actionFlows
+	addFlows = flows
 	for _, flowChange := range changes {
 		if flowChange.matchFlow != nil {
 			flowChanges = append(flowChanges, flowChange.matchFlow)
@@ -1021,6 +1034,9 @@ func (c *client) UninstallPolicyRuleFlows(ruleID uint32) ([]string, error) {
 	if err := c.ofEntryOperations.DeleteAll(conj.actionFlows); err != nil {
 		return nil, err
 	}
+	if err := c.ofEntryOperations.DeleteAll(conj.metricFlows); err != nil {
+		return nil, err
+	}
 
 	c.conjMatchFlowLock.Lock()
 	defer c.conjMatchFlowLock.Unlock()
@@ -1072,9 +1088,16 @@ func (c *client) replayPolicyFlows() {
 			flows = append(flows, flow)
 		}
 	}
+	addMetricFlows := func(conj *policyRuleConjunction) {
+		for _, flow := range conj.metricFlows {
+			flow.Reset()
+			flows = append(flows, flow)
+		}
+	}
 
 	for _, conj := range c.policyCache.List() {
 		addActionFlows(conj.(*policyRuleConjunction))
+		addMetricFlows(conj.(*policyRuleConjunction))
 	}
 
 	addMatchFlows := func(ctx *conjMatchFlowContext) {
@@ -1315,15 +1338,72 @@ func (c *client) ReassignFlowPriorities(updates map[uint16]uint16, table binding
 	return nil
 }
 
-// ReassignFlowPriorities takes a list of priority updates, and update the actionFlows to replace
-// the old priority with the desired one, for each priority update.
-func (c *client) GetNetworkPolicyRuleStats() (map[uint32]*metricsv1alpha1.NetworkPolicyStats, error) {
-	stats := map[uint32]*metricsv1alpha1.NetworkPolicyStats{}
-	stats[1] = &metricsv1alpha1.NetworkPolicyStats{
-		Packets:  2,
-		Bytes:    2,
-		Sessions: 2,
+func parseDropFlow(flow string) (uint32, metricsv1alpha1.NetworkPolicyStats) {
+	// example format:
+	// table=101, n_packets=9, n_bytes=666, priority=200,ip,reg0=0x100000/0x100000,reg3=0x5 actions=drop
+	segs := strings.Split(flow, ",")
+	m := metricsv1alpha1.NetworkPolicyStats{}
+	pkts, _ := strconv.ParseInt(segs[1][strings.Index(segs[1], "=")+1:], 10, 32)
+	m.Packets = pkts
+	bytes, _ := strconv.ParseInt(segs[2][strings.Index(segs[2], "=")+1:], 10, 32)
+	m.Bytes = bytes
+	id, _ := strconv.ParseInt(segs[6][strings.Index(segs[6], "0x")+2:strings.Index(segs[6], " ")], 16, 32)
+	return uint32(id), m
+}
+
+func parseAllowFlow(flow string) (uint32, metricsv1alpha1.NetworkPolicyStats) {
+	// example format:
+	// table=101, n_packets=0, n_bytes=0, priority=200,ct_state=-new,ct_label=0x1/0xffffffff,ip actions=goto_table:105
+	segs := strings.Split(flow, ",")
+	m := metricsv1alpha1.NetworkPolicyStats{}
+	pkts, _ := strconv.ParseInt(segs[1][strings.Index(segs[1], "=")+1:], 10, 32)
+	m.Packets = pkts
+	if strings.Contains(segs[4], "+") {
+		m.Sessions = pkts
 	}
-	return stats, nil
-	// return nil, fmt.Errorf("Not implemented")
+	bytes, _ := strconv.ParseInt(segs[2][strings.Index(segs[2], "=")+1:], 10, 32)
+	m.Bytes = bytes
+	id, _ := strconv.ParseUint(segs[5][strings.Index(segs[5], "0x")+2:strings.Index(segs[5], "/")], 16, 32)
+	return uint32(id), m
+}
+
+func parseMetricFlow(flow string) (uint32, metricsv1alpha1.NetworkPolicyStats) {
+	if strings.Contains(flow, "reg0") {
+		return parseDropFlow(flow)
+	} else {
+		return parseAllowFlow(flow)
+	}
+}
+
+func (c *client) GetNetworkPolicyRuleStats() (map[uint32]*metricsv1alpha1.NetworkPolicyStats, error) {
+	result := map[uint32]*metricsv1alpha1.NetworkPolicyStats{}
+	egressFlows, _ := ovsctl.NewClient(c.nodeConfig.OVSBridge).DumpTableFlows(uint8(EgressMetricTable))
+	for _, flow := range egressFlows {
+		if strings.Contains(flow, "priority=0") {
+			continue
+		}
+		ruleID, metric := parseMetricFlow(flow)
+		if accMetric, ok := result[ruleID]; ok {
+			accMetric.Bytes += metric.Bytes
+			accMetric.Packets += metric.Packets
+			accMetric.Sessions += metric.Sessions
+		} else {
+			result[ruleID] = &metric
+		}
+	}
+	ingressFlows, _ := ovsctl.NewClient(c.nodeConfig.OVSBridge).DumpTableFlows(uint8(IngressMetricTable))
+	for _, flow := range ingressFlows {
+		if strings.Contains(flow, "priority=0") {
+			continue
+		}
+		ruleID, metric := parseMetricFlow(flow)
+		if accMetric, ok := result[ruleID]; ok {
+			accMetric.Bytes += metric.Bytes
+			accMetric.Packets += metric.Packets
+			accMetric.Sessions += metric.Sessions
+		} else {
+			result[ruleID] = &metric
+		}
+	}
+	return result, nil
 }
