@@ -184,6 +184,33 @@ func (b *ofFlowBuilder) MatchCTMarkMask(mask uint32) FlowBuilder {
 	return b
 }
 
+func (b *ofFlowBuilder) MatchCTLabel(high, low uint64) FlowBuilder {
+	return b.MatchCTLabelRange(high, low, Range{0, 127})
+}
+
+func (b *ofFlowBuilder) MatchCTLabelRange(high, low uint64, rng Range) FlowBuilder {
+	b.matchers = append(b.matchers, fmt.Sprintf("ct_label[%d..%d]=0x%x%x", rng[0], rng[1], high, low))
+	b.ofFlow.Match.CtLabelHi = high
+	b.ofFlow.Match.CtLabelLo = low
+	b.ofFlow.Match.CtLabelHiMask = 0xffff_ffff_ffff_ffff
+	b.ofFlow.Match.CtLabelLoMask = 0xffff_ffff_ffff_ffff
+	if rng[0] < 64 && rng[1] >= 64 {
+		b.ofFlow.Match.CtLabelLoMask <<= rng[0]
+		b.ofFlow.Match.CtLabelHiMask >>= 127 - rng[1]
+	} else if rng[1] < 64 {
+		b.ofFlow.Match.CtLabelLoMask <<= rng[0]
+		b.ofFlow.Match.CtLabelLoMask <<= 63 - rng[1]
+		b.ofFlow.Match.CtLabelLoMask >>= 63 - rng[1]
+		b.ofFlow.Match.CtLabelHiMask = 0
+	} else if rng[0] >= 64 {
+		b.ofFlow.Match.CtLabelHiMask <<= rng[0] - 64
+		b.ofFlow.Match.CtLabelHiMask <<= 127 - rng[1]
+		b.ofFlow.Match.CtLabelHiMask <<= 127 - rng[1]
+		b.ofFlow.Match.CtLabelHiMask = 0
+	}
+	return b
+}
+
 // MatchInPort adds match condition for matching in_port.
 func (b *ofFlowBuilder) MatchInPort(inPort uint32) FlowBuilder {
 	b.matchers = append(b.matchers, fmt.Sprintf("in_port=%d", inPort))
