@@ -19,5 +19,4 @@
 // +groupName=controlplane.antrea.tanzu.vmware.com
 
 // Package v1alpha1 is the v1alpha1 version of the Antrea controlplane API.
-
 package v1alpha1
