@@ -15,6 +15,9 @@
 package apiserver
 
 import (
+	"encoding/json"
+	"net/http"
+
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -24,12 +27,17 @@ import (
 	"k8s.io/client-go/informers"
 	"k8s.io/klog"
 
+	"github.com/vmware-tanzu/antrea/pkg/controller/stats"
+	"github.com/vmware-tanzu/antrea/pkg/apis/metrics"
+	metricsinstall "github.com/vmware-tanzu/antrea/pkg/apis/metrics/install"
 	"github.com/vmware-tanzu/antrea/pkg/apis/networking"
+	metricsv1alpha1 "github.com/vmware-tanzu/antrea/pkg/apis/metrics/v1alpha1"
 	networkinginstall "github.com/vmware-tanzu/antrea/pkg/apis/networking/install"
 	systeminstall "github.com/vmware-tanzu/antrea/pkg/apis/system/install"
 	system "github.com/vmware-tanzu/antrea/pkg/apis/system/v1beta1"
 	"github.com/vmware-tanzu/antrea/pkg/apiserver/certificate"
 	"github.com/vmware-tanzu/antrea/pkg/apiserver/handlers/endpoint"
+	"github.com/vmware-tanzu/antrea/pkg/apiserver/registry/metrics/clusternetworkpolicy"
 	"github.com/vmware-tanzu/antrea/pkg/apiserver/registry/networkpolicy/addressgroup"
 	"github.com/vmware-tanzu/antrea/pkg/apiserver/registry/networkpolicy/appliedtogroup"
 	"github.com/vmware-tanzu/antrea/pkg/apiserver/registry/networkpolicy/networkpolicy"
@@ -53,6 +61,7 @@ var (
 func init() {
 	networkinginstall.Install(Scheme)
 	systeminstall.Install(Scheme)
+	metricsinstall.Install(Scheme)
 	// We need to add the options to empty v1, see sample-apiserver/pkg/apiserver/apiserver.go.
 	metav1.AddToGroupVersion(Scheme, schema.GroupVersion{Version: "v1"})
 }
@@ -65,6 +74,7 @@ type ExtraConfig struct {
 	controllerQuerier   querier.ControllerQuerier
 	endpointQuerier     networkquery.EndpointQuerier
 	caCertController    *certificate.CACertController
+	statsManager        *stats.Manager
 }
 
 // Config defines the config for Antrea apiserver.
@@ -98,6 +108,7 @@ func NewConfig(
 	genericConfig *genericapiserver.Config,
 	addressGroupStore, appliedToGroupStore, networkPolicyStore storage.Interface,
 	caCertController *certificate.CACertController,
+	metricCollector *stats.Manager,
 	controllerQuerier querier.ControllerQuerier,
 	endpointQuerier networkquery.EndpointQuerier) *Config {
 	return &Config{
@@ -107,6 +118,7 @@ func NewConfig(
 			appliedToGroupStore: appliedToGroupStore,
 			networkPolicyStore:  networkPolicyStore,
 			caCertController:    caCertController,
+			statsManager:        metricCollector,
 			controllerQuerier:   controllerQuerier,
 			endpointQuerier:     endpointQuerier,
 		},
@@ -133,7 +145,12 @@ func installAPIGroup(s *APIServer, c completedConfig) error {
 	systemStorage["supportbundles/download"] = bundleStorage.Download
 	systemGroup.VersionedResourcesStorageMap["v1beta1"] = systemStorage
 
-	groups := []*genericapiserver.APIGroupInfo{&networkingGroup, &systemGroup}
+	metricsGroup := genericapiserver.NewDefaultAPIGroupInfo(metrics.GroupName, Scheme, metav1.ParameterCodec, Codecs)
+	metricsStorage := map[string]rest.Storage{}
+	metricsStorage["clusternetworkpolicies"] = clusternetworkpolicy.NewREST(c.extraConfig.statsManager)
+	metricsGroup.VersionedResourcesStorageMap["v1alpha1"] = metricsStorage
+
+	groups := []*genericapiserver.APIGroupInfo{&networkingGroup, &systemGroup, &metricsGroup}
 	for _, apiGroupInfo := range groups {
 		if err := s.GenericAPIServer.InstallAPIGroup(apiGroupInfo); err != nil {
 			return err
@@ -163,5 +180,19 @@ func (c completedConfig) New() (*APIServer, error) {
 
 	installHandlers(c.extraConfig.endpointQuerier, s.GenericAPIServer)
 
+	s.GenericAPIServer.Handler.NonGoRestfulMux.HandleFunc("/stats/networkpolicy", HandleFunc(c.extraConfig.statsManager))
 	return s, nil
+}
+
+func HandleFunc(metricCollector stats.MetricCollector) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		klog.Info("Received")
+		var metrics []metricsv1alpha1.ClusterNetworkPolicyMetric
+
+		err := json.NewDecoder(r.Body).Decode(&metrics)
+		if err != nil {
+			klog.Errorf("Error decoding body: %v", err)
+		}
+		metricCollector.Collect(metrics)
+	}
 }

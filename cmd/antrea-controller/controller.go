@@ -30,6 +30,7 @@ import (
 	"k8s.io/klog"
 	aggregatorclientset "k8s.io/kube-aggregator/pkg/client/clientset_generated/clientset"
 
+	"github.com/vmware-tanzu/antrea/pkg/controller/stats"
 	"github.com/vmware-tanzu/antrea/pkg/apiserver"
 	"github.com/vmware-tanzu/antrea/pkg/apiserver/certificate"
 	"github.com/vmware-tanzu/antrea/pkg/apiserver/openapi"
@@ -112,6 +113,8 @@ func run(o *Options) error {
 		traceflowController = traceflow.NewTraceflowController(crdClient, podInformer, traceflowInformer)
 	}
 
+	statsManager := stats.NewManager()
+
 	apiServerConfig, err := createAPIServerConfig(o.config.ClientConnection.Kubeconfig,
 		client,
 		aggregatorClient,
@@ -122,6 +125,7 @@ func run(o *Options) error {
 		networkPolicyStore,
 		controllerQuerier,
 		endpointQuerier,
+		statsManager,
 		o.config.EnablePrometheusMetrics)
 	if err != nil {
 		return fmt.Errorf("error creating API server config: %v", err)
@@ -146,6 +150,8 @@ func run(o *Options) error {
 
 	go apiServer.Run(stopCh)
 
+	go statsManager.Run(stopCh)
+
 	if o.config.EnablePrometheusMetrics {
 		metrics.InitializePrometheusMetrics()
 	}
@@ -169,10 +175,11 @@ func createAPIServerConfig(kubeconfig string,
 	networkPolicyStore storage.Interface,
 	controllerQuerier querier.ControllerQuerier,
 	endpointQuerier networkpolicy.EndpointQuerier,
+	metricCollector *stats.Manager,
 	enableMetrics bool) (*apiserver.Config, error) {
 	secureServing := genericoptions.NewSecureServingOptions().WithLoopback()
 	authentication := genericoptions.NewDelegatingAuthenticationOptions()
-	authorization := genericoptions.NewDelegatingAuthorizationOptions().WithAlwaysAllowPaths("/healthz")
+	authorization := genericoptions.NewDelegatingAuthorizationOptions().WithAlwaysAllowPaths("/healthz").WithAlwaysAllowPaths("/stats/networkpolicy")
 
 	caCertController, err := certificate.ApplyServerCert(selfSignedCert, client, aggregatorClient, secureServing)
 	if err != nil {
@@ -217,6 +224,7 @@ func createAPIServerConfig(kubeconfig string,
 		appliedToGroupStore,
 		networkPolicyStore,
 		caCertController,
+		metricCollector,
 		controllerQuerier,
 		endpointQuerier), nil
 }

@@ -27,6 +27,7 @@ import (
 	"github.com/vmware-tanzu/antrea/pkg/agent/types"
 	binding "github.com/vmware-tanzu/antrea/pkg/ovs/openflow"
 	"github.com/vmware-tanzu/antrea/third_party/proxy"
+	metricsv1alpha1 "github.com/vmware-tanzu/antrea/pkg/apis/metrics/v1alpha1"
 )
 
 const maxRetryForOFSwitch = 5
@@ -224,6 +225,9 @@ type Client interface {
 	// RegisterPacketInHandler uses SubscribePacketIn to get PacketIn message and process received
 	// packets through registered handlers.
 	StartPacketInHandler(stopCh <-chan struct{})
+
+	// Get traffic metrics of each NetworkPolicy rule.
+	GetNetworkPolicyRuleStats() (map[uint32]*metricsv1alpha1.NetworkPolicyStats, error)
 }
 
 // GetFlowTableStatus returns an array of flow table status.

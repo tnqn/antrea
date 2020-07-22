@@ -25,6 +25,7 @@ import (
 	"github.com/vmware-tanzu/antrea/pkg/apis/networking/v1beta1"
 	secv1alpha1 "github.com/vmware-tanzu/antrea/pkg/apis/security/v1alpha1"
 	binding "github.com/vmware-tanzu/antrea/pkg/ovs/openflow"
+	metricsv1alpha1 "github.com/vmware-tanzu/antrea/pkg/apis/metrics/v1alpha1"
 )
 
 const (
@@ -1312,4 +1313,17 @@ func (c *client) ReassignFlowPriorities(updates map[uint16]uint16, table binding
 		c.policyCache.Update(updatedConj)
 	}
 	return nil
+}
+
+// ReassignFlowPriorities takes a list of priority updates, and update the actionFlows to replace
+// the old priority with the desired one, for each priority update.
+func (c *client) GetNetworkPolicyRuleStats() (map[uint32]*metricsv1alpha1.NetworkPolicyStats, error) {
+	stats := map[uint32]*metricsv1alpha1.NetworkPolicyStats{}
+	stats[1] = &metricsv1alpha1.NetworkPolicyStats{
+		Packets:  2,
+		Bytes:    2,
+		Sessions: 2,
+	}
+	return stats, nil
+	// return nil, fmt.Errorf("Not implemented")
 }
