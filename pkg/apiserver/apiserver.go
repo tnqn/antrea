@@ -24,12 +24,17 @@ import (
 	"k8s.io/client-go/informers"
 	"k8s.io/klog"
 
+	"github.com/vmware-tanzu/antrea/pkg/apis/metrics"
+	metricsinstall "github.com/vmware-tanzu/antrea/pkg/apis/metrics/install"
 	"github.com/vmware-tanzu/antrea/pkg/apis/networking"
 	networkinginstall "github.com/vmware-tanzu/antrea/pkg/apis/networking/install"
 	systeminstall "github.com/vmware-tanzu/antrea/pkg/apis/system/install"
 	system "github.com/vmware-tanzu/antrea/pkg/apis/system/v1beta1"
 	"github.com/vmware-tanzu/antrea/pkg/apiserver/certificate"
 	"github.com/vmware-tanzu/antrea/pkg/apiserver/handlers/endpoint"
+	"github.com/vmware-tanzu/antrea/pkg/apiserver/handlers/stats"
+	"github.com/vmware-tanzu/antrea/pkg/apiserver/registry/metrics/clusternetworkpolicy"
+	"github.com/vmware-tanzu/antrea/pkg/apiserver/registry/metrics/k8snetworkpolicy"
 	"github.com/vmware-tanzu/antrea/pkg/apiserver/registry/networkpolicy/addressgroup"
 	"github.com/vmware-tanzu/antrea/pkg/apiserver/registry/networkpolicy/appliedtogroup"
 	"github.com/vmware-tanzu/antrea/pkg/apiserver/registry/networkpolicy/networkpolicy"
@@ -53,6 +58,7 @@ var (
 func init() {
 	networkinginstall.Install(Scheme)
 	systeminstall.Install(Scheme)
+	metricsinstall.Install(Scheme)
 	// We need to add the options to empty v1, see sample-apiserver/pkg/apiserver/apiserver.go.
 	metav1.AddToGroupVersion(Scheme, schema.GroupVersion{Version: "v1"})
 }
@@ -65,6 +71,7 @@ type ExtraConfig struct {
 	controllerQuerier   querier.ControllerQuerier
 	endpointQuerier     networkquery.EndpointQuerier
 	caCertController    *certificate.CACertController
+	statsAggregator     *stats.Aggregator
 }
 
 // Config defines the config for Antrea apiserver.
@@ -98,6 +105,7 @@ func NewConfig(
 	genericConfig *genericapiserver.Config,
 	addressGroupStore, appliedToGroupStore, networkPolicyStore storage.Interface,
 	caCertController *certificate.CACertController,
+	statsAggregator *stats.Aggregator,
 	controllerQuerier querier.ControllerQuerier,
 	endpointQuerier networkquery.EndpointQuerier) *Config {
 	return &Config{
@@ -107,6 +115,7 @@ func NewConfig(
 			appliedToGroupStore: appliedToGroupStore,
 			networkPolicyStore:  networkPolicyStore,
 			caCertController:    caCertController,
+			statsAggregator:     statsAggregator,
 			controllerQuerier:   controllerQuerier,
 			endpointQuerier:     endpointQuerier,
 		},
@@ -133,7 +142,13 @@ func installAPIGroup(s *APIServer, c completedConfig) error {
 	systemStorage["supportbundles/download"] = bundleStorage.Download
 	systemGroup.VersionedResourcesStorageMap["v1beta1"] = systemStorage
 
-	groups := []*genericapiserver.APIGroupInfo{&networkingGroup, &systemGroup}
+	metricsGroup := genericapiserver.NewDefaultAPIGroupInfo(metrics.GroupName, Scheme, metav1.ParameterCodec, Codecs)
+	metricsStorage := map[string]rest.Storage{}
+	metricsStorage["clusternetworkpolicies"] = clusternetworkpolicy.NewREST(c.extraConfig.statsAggregator)
+	metricsStorage["k8snetworkpolicies"] = k8snetworkpolicy.NewREST(c.extraConfig.statsAggregator)
+	metricsGroup.VersionedResourcesStorageMap["v1alpha1"] = metricsStorage
+
+	groups := []*genericapiserver.APIGroupInfo{&networkingGroup, &systemGroup, &metricsGroup}
 	for _, apiGroupInfo := range groups {
 		if err := s.GenericAPIServer.InstallAPIGroup(apiGroupInfo); err != nil {
 			return err
@@ -142,8 +157,9 @@ func installAPIGroup(s *APIServer, c completedConfig) error {
 	return nil
 }
 
-func installHandlers(eq networkquery.EndpointQuerier, s *genericapiserver.GenericAPIServer) {
-	s.Handler.NonGoRestfulMux.HandleFunc("/endpoint", endpoint.HandleFunc(eq))
+func installHandlers(s *genericapiserver.GenericAPIServer, c completedConfig) {
+	s.Handler.NonGoRestfulMux.HandleFunc("/endpoint", endpoint.HandleFunc(c.extraConfig.endpointQuerier))
+	s.Handler.NonGoRestfulMux.HandleFunc("/networkpolicy/stats", stats.HandleFunc(c.extraConfig.statsAggregator))
 }
 
 func (c completedConfig) New() (*APIServer, error) {
@@ -161,7 +177,6 @@ func (c completedConfig) New() (*APIServer, error) {
 		return nil, err
 	}
 
-	installHandlers(c.extraConfig.endpointQuerier, s.GenericAPIServer)
-
+	installHandlers(s.GenericAPIServer, c)
 	return s, nil
 }

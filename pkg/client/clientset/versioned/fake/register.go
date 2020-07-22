@@ -19,6 +19,7 @@ package fake
 import (
 	clusterinformationv1beta1 "github.com/vmware-tanzu/antrea/pkg/apis/clusterinformation/v1beta1"
 	corev1alpha1 "github.com/vmware-tanzu/antrea/pkg/apis/core/v1alpha1"
+	metricsv1alpha1 "github.com/vmware-tanzu/antrea/pkg/apis/metrics/v1alpha1"
 	networkingv1beta1 "github.com/vmware-tanzu/antrea/pkg/apis/networking/v1beta1"
 	opsv1alpha1 "github.com/vmware-tanzu/antrea/pkg/apis/ops/v1alpha1"
 	securityv1alpha1 "github.com/vmware-tanzu/antrea/pkg/apis/security/v1alpha1"
@@ -36,6 +37,7 @@ var parameterCodec = runtime.NewParameterCodec(scheme)
 var localSchemeBuilder = runtime.SchemeBuilder{
 	clusterinformationv1beta1.AddToScheme,
 	corev1alpha1.AddToScheme,
+	metricsv1alpha1.AddToScheme,
 	networkingv1beta1.AddToScheme,
 	opsv1alpha1.AddToScheme,
 	securityv1alpha1.AddToScheme,
