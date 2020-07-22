@@ -625,6 +625,14 @@ rules:
   - get
   - list
 - apiGroups:
+  - metrics.antrea.tanzu.vmware.com
+  resources:
+  - networkpolicymetrics
+  - clusternetworkpolicymetrics
+  verbs:
+  - get
+  - list
+- apiGroups:
   - system.antrea.tanzu.vmware.com
   resources:
   - controllerinfos
@@ -699,6 +707,12 @@ rules:
   - get
   - watch
   - list
+- apiGroups:
+  - controlplane.antrea.tanzu.vmware.com
+  resources:
+  - nodestatssummaries
+  verbs:
+  - create
 - apiGroups:
   - authentication.k8s.io
   resources:
@@ -820,6 +834,7 @@ rules:
 - apiGroups:
   - apiregistration.k8s.io
   resourceNames:
+  - v1alpha1.metrics.antrea.tanzu.vmware.com
   - v1beta1.system.antrea.tanzu.vmware.com
   - v1beta1.controlplane.antrea.tanzu.vmware.com
   resources:
@@ -941,6 +956,9 @@ data:
     # Enable flowexporter which exports polled conntrack connections as IPFIX flow records from each agent to a configured collector.
     #  FlowExporter: false
 
+    # Enable collecting and exporting NetworkPolicy Metrics.
+    #  NetworkPolicyMetrics: false
+
     # Name of the OpenVSwitch bridge antrea-agent will create and use.
     # Make sure it doesn't conflict with your existing OpenVSwitch bridges.
     #ovsBridge: br-int
@@ -1031,6 +1049,9 @@ data:
     # feature that supports priorities, rule actions and externalEntities in the future.
     #  AntreaPolicy: false
 
+    # Enable collecting and exporting NetworkPolicy Metrics.
+    #  NetworkPolicyMetrics: false
+
     # The port for the antrea-controller APIServer to serve on.
     # Note that if it's set to another value, the `containerPort` of the `api` port of the
     # `antrea-controller` container must be set to the same value.
@@ -1052,7 +1073,7 @@ metadata:
   annotations: {}
   labels:
     app: antrea
-  name: antrea-config-dm2mbk47h5
+  name: antrea-config-g54g5fmd49
   namespace: kube-system
 ---
 apiVersion: v1
@@ -1158,7 +1179,7 @@ spec:
         key: node-role.kubernetes.io/master
       volumes:
       - configMap:
-          name: antrea-config-dm2mbk47h5
+          name: antrea-config-g54g5fmd49
         name: antrea-config
       - name: antrea-controller-tls
         secret:
@@ -1169,6 +1190,21 @@ spec:
           path: /var/log/antrea
           type: DirectoryOrCreate
         name: host-var-log-antrea
+---
+apiVersion: apiregistration.k8s.io/v1
+kind: APIService
+metadata:
+  labels:
+    app: antrea
+  name: v1alpha1.metrics.antrea.tanzu.vmware.com
+spec:
+  group: metrics.antrea.tanzu.vmware.com
+  groupPriorityMinimum: 100
+  service:
+    name: antrea
+    namespace: kube-system
+  version: v1alpha1
+  versionPriority: 100
 ---
 apiVersion: apiregistration.k8s.io/v1
 kind: APIService
@@ -1373,7 +1409,7 @@ spec:
         operator: Exists
       volumes:
       - configMap:
-          name: antrea-config-dm2mbk47h5
+          name: antrea-config-g54g5fmd49
         name: antrea-config
       - hostPath:
           path: /etc/cni/net.d

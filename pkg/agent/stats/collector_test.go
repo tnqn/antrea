@@ -1,0 +1,278 @@
+// Copyright 2020 Antrea Authors
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+package stats
+
+import (
+	"testing"
+
+	"github.com/golang/mock/gomock"
+	"github.com/stretchr/testify/assert"
+
+	oftest "github.com/vmware-tanzu/antrea/pkg/agent/openflow/testing"
+	"github.com/vmware-tanzu/antrea/pkg/agent/types"
+	cpv1alpha1 "github.com/vmware-tanzu/antrea/pkg/apis/controlplane/v1alpha1"
+	metricsv1alpha1 "github.com/vmware-tanzu/antrea/pkg/apis/metrics/v1alpha1"
+)
+
+var (
+	k8sNP1 = cpv1alpha1.NetworkPolicyReference{
+		Category:  cpv1alpha1.K8sNetworkPolicy,
+		Namespace: "foo",
+		Name:      "bar",
+	}
+	k8sNP2 = cpv1alpha1.NetworkPolicyReference{
+		Category:  cpv1alpha1.K8sNetworkPolicy,
+		Namespace: "foo",
+		Name:      "boo",
+	}
+	cnp1 = cpv1alpha1.NetworkPolicyReference{
+		Category:  cpv1alpha1.ClusterNetworkPolicy,
+		Namespace: "",
+		Name:      "boo",
+	}
+)
+
+func TestCollect(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	type ofIDToPolicyMap map[uint32]struct {
+		Name      string
+		Namespace string
+	}
+	tests := []struct {
+		name                string
+		ruleStats           map[uint32]*types.RuleMetric
+		ofIDToPolicyMap     ofIDToPolicyMap
+		expectedPolicyStats map[cpv1alpha1.NetworkPolicyReference]*metricsv1alpha1.TrafficStats
+	}{
+		{
+			name: "one or multiple rules per policy",
+			ruleStats: map[uint32]*types.RuleMetric{
+				1: {
+					Bytes:    10,
+					Packets:  1,
+					Sessions: 1,
+				},
+				2: {
+					Bytes:    15,
+					Packets:  2,
+					Sessions: 1,
+				},
+				3: {
+					Bytes:    30,
+					Packets:  5,
+					Sessions: 3,
+				},
+			},
+			ofIDToPolicyMap: ofIDToPolicyMap{
+				1: {Namespace: k8sNP1.Namespace, Name: k8sNP1.Name},
+				2: {Namespace: k8sNP1.Namespace, Name: k8sNP1.Name},
+				3: {Namespace: k8sNP2.Namespace, Name: k8sNP2.Name},
+			},
+			expectedPolicyStats: map[cpv1alpha1.NetworkPolicyReference]*metricsv1alpha1.TrafficStats{
+				k8sNP1: {
+					Bytes:    25,
+					Packets:  3,
+					Sessions: 2,
+				},
+				k8sNP2: {
+					Bytes:    30,
+					Packets:  5,
+					Sessions: 3,
+				},
+			},
+		},
+		{
+			name: "cluster networkpolicies, k8s networkpolicies, and unknown networkpolicies",
+			ruleStats: map[uint32]*types.RuleMetric{
+				1: {
+					Bytes:    10,
+					Packets:  1,
+					Sessions: 1,
+				},
+				2: {
+					Bytes:    15,
+					Packets:  2,
+					Sessions: 1,
+				},
+				3: {
+					Bytes:    30,
+					Packets:  5,
+					Sessions: 3,
+				},
+			},
+			ofIDToPolicyMap: ofIDToPolicyMap{
+				1: {Namespace: k8sNP1.Namespace, Name: k8sNP1.Name},
+				2: {Namespace: cnp1.Namespace, Name: cnp1.Name},
+				3: {Namespace: "", Name: ""},
+			},
+			expectedPolicyStats: map[cpv1alpha1.NetworkPolicyReference]*metricsv1alpha1.TrafficStats{
+				k8sNP1: {
+					Bytes:    10,
+					Packets:  1,
+					Sessions: 1,
+				},
+				cnp1: {
+					Bytes:    15,
+					Packets:  2,
+					Sessions: 1,
+				},
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ofClient := oftest.NewMockClient(ctrl)
+			ofClient.EXPECT().NetworkPolicyMetrics().Return(tt.ruleStats).Times(1)
+			for ofID, policy := range tt.ofIDToPolicyMap {
+				ofClient.EXPECT().GetPolicyFromConjunction(ofID).Return(policy.Name, policy.Namespace)
+			}
+
+			m := &Collector{ofClient: ofClient}
+			actualPolicyStats := m.collect()
+			assert.Equal(t, tt.expectedPolicyStats, actualPolicyStats)
+		})
+	}
+}
+
+func TestCalculateDiff(t *testing.T) {
+	tests := []struct {
+		name            string
+		lastStats       map[cpv1alpha1.NetworkPolicyReference]*metricsv1alpha1.TrafficStats
+		curStats        map[cpv1alpha1.NetworkPolicyReference]*metricsv1alpha1.TrafficStats
+		expectedMetrics []cpv1alpha1.NetworkPolicyStats
+	}{
+		{
+			name: "new networkpolicy and existing networkpolicy",
+			lastStats: map[cpv1alpha1.NetworkPolicyReference]*metricsv1alpha1.TrafficStats{
+				k8sNP1: {
+					Bytes:    1,
+					Packets:  1,
+					Sessions: 1,
+				},
+			},
+			curStats: map[cpv1alpha1.NetworkPolicyReference]*metricsv1alpha1.TrafficStats{
+				k8sNP1: {
+					Bytes:    25,
+					Packets:  3,
+					Sessions: 2,
+				},
+				cnp1: {
+					Bytes:    30,
+					Packets:  5,
+					Sessions: 3,
+				},
+			},
+			expectedMetrics: []cpv1alpha1.NetworkPolicyStats{
+				{
+					NetworkPolicy: k8sNP1,
+					TrafficStats: metricsv1alpha1.TrafficStats{
+						Bytes:    24,
+						Packets:  2,
+						Sessions: 1,
+					},
+				},
+				{
+					NetworkPolicy: cnp1,
+					TrafficStats: metricsv1alpha1.TrafficStats{
+						Bytes:    30,
+						Packets:  5,
+						Sessions: 3,
+					},
+				},
+			},
+		},
+		{
+			name: "unchanged networkpolicy",
+			lastStats: map[cpv1alpha1.NetworkPolicyReference]*metricsv1alpha1.TrafficStats{
+				k8sNP1: {
+					Bytes:    1,
+					Packets:  1,
+					Sessions: 1,
+				},
+				k8sNP2: {
+					Bytes:    0,
+					Packets:  0,
+					Sessions: 0,
+				},
+			},
+			curStats: map[cpv1alpha1.NetworkPolicyReference]*metricsv1alpha1.TrafficStats{
+				k8sNP1: {
+					Bytes:    1,
+					Packets:  1,
+					Sessions: 1,
+				},
+				k8sNP2: {
+					Bytes:    0,
+					Packets:  0,
+					Sessions: 0,
+				},
+			},
+			expectedMetrics: []cpv1alpha1.NetworkPolicyStats{},
+		},
+		{
+			name: "negative statistic",
+			lastStats: map[cpv1alpha1.NetworkPolicyReference]*metricsv1alpha1.TrafficStats{
+				k8sNP1: {
+					Bytes:    10,
+					Packets:  10,
+					Sessions: 10,
+				},
+				k8sNP2: {
+					Bytes:    5,
+					Packets:  5,
+					Sessions: 5,
+				},
+			},
+			curStats: map[cpv1alpha1.NetworkPolicyReference]*metricsv1alpha1.TrafficStats{
+				k8sNP1: {
+					Bytes:    3,
+					Packets:  3,
+					Sessions: 3,
+				},
+				k8sNP2: {
+					Bytes:    1,
+					Packets:  1,
+					Sessions: 1,
+				},
+			},
+			expectedMetrics: []cpv1alpha1.NetworkPolicyStats{
+				{
+					NetworkPolicy: k8sNP1,
+					TrafficStats: metricsv1alpha1.TrafficStats{
+						Bytes:    3,
+						Packets:  3,
+						Sessions: 3,
+					},
+				},
+				{
+					NetworkPolicy: k8sNP2,
+					TrafficStats: metricsv1alpha1.TrafficStats{
+						Bytes:    1,
+						Packets:  1,
+						Sessions: 1,
+					},
+				},
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			actualMetrics := calculateDiff(tt.curStats, tt.lastStats)
+			assert.ElementsMatch(t, tt.expectedMetrics, actualMetrics)
+		})
+	}
+}

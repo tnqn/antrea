@@ -86,6 +86,7 @@ rules:
     resources:
       - apiservices
     resourceNames:
+      - v1alpha1.metrics.antrea.tanzu.vmware.com
       - v1beta1.system.antrea.tanzu.vmware.com
       - v1beta1.controlplane.antrea.tanzu.vmware.com
     verbs:

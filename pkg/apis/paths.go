@@ -12,11 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// +k8s:openapi-gen=true
-// +k8s:deepcopy-gen=package
-// +k8s:protobuf-gen=package
-// +k8s:conversion-gen=github.com/vmware-tanzu/antrea/pkg/apis/controlplane
-// +groupName=controlplane.antrea.tanzu.vmware.com
+package apis
 
-// Package v1alpha1 is the v1alpha1 version of the Antrea controlplane API.
-package v1alpha1
+const (
+	// Endpoint is the path of the endpoint querier API of the antrea-controller.
+	Endpoint = "/endpoint"
+	// StatsNodeSummary is the path of the stats summary API of the antrea-controller.
+	StatsNodeSummary = "/stats/nodesummary"
+)

@@ -30,10 +30,15 @@ import (
 
 	"github.com/vmware-tanzu/antrea/pkg/apis/controlplane"
 	cpinstall "github.com/vmware-tanzu/antrea/pkg/apis/controlplane/install"
+	"github.com/vmware-tanzu/antrea/pkg/apis/metrics"
+	metricsinstall "github.com/vmware-tanzu/antrea/pkg/apis/metrics/install"
 	systeminstall "github.com/vmware-tanzu/antrea/pkg/apis/system/install"
 	system "github.com/vmware-tanzu/antrea/pkg/apis/system/v1beta1"
 	"github.com/vmware-tanzu/antrea/pkg/apiserver/certificate"
 	"github.com/vmware-tanzu/antrea/pkg/apiserver/handlers/endpoint"
+	"github.com/vmware-tanzu/antrea/pkg/apiserver/registry/controlplane/nodestatssummary"
+	"github.com/vmware-tanzu/antrea/pkg/apiserver/registry/metrics/clusternetworkpolicymetrics"
+	"github.com/vmware-tanzu/antrea/pkg/apiserver/registry/metrics/networkpolicymetrics"
 	"github.com/vmware-tanzu/antrea/pkg/apiserver/registry/networkpolicy/addressgroup"
 	"github.com/vmware-tanzu/antrea/pkg/apiserver/registry/networkpolicy/appliedtogroup"
 	"github.com/vmware-tanzu/antrea/pkg/apiserver/registry/networkpolicy/networkpolicy"
@@ -42,6 +47,7 @@ import (
 	"github.com/vmware-tanzu/antrea/pkg/apiserver/storage"
 	networkquery "github.com/vmware-tanzu/antrea/pkg/controller/networkpolicy"
 	"github.com/vmware-tanzu/antrea/pkg/controller/querier"
+	"github.com/vmware-tanzu/antrea/pkg/controller/stats"
 )
 
 var (
@@ -57,6 +63,7 @@ var (
 func init() {
 	cpinstall.Install(Scheme)
 	systeminstall.Install(Scheme)
+	metricsinstall.Install(Scheme)
 	// We need to add the options to empty v1, see sample-apiserver/pkg/apiserver/apiserver.go.
 	metav1.AddToGroupVersion(Scheme, schema.GroupVersion{Version: "v1"})
 }
@@ -69,6 +76,7 @@ type ExtraConfig struct {
 	controllerQuerier   querier.ControllerQuerier
 	endpointQuerier     networkquery.EndpointQuerier
 	caCertController    *certificate.CACertController
+	statsAggregator     *stats.Aggregator
 }
 
 // Config defines the config for Antrea apiserver.
@@ -102,6 +110,7 @@ func NewConfig(
 	genericConfig *genericapiserver.Config,
 	addressGroupStore, appliedToGroupStore, networkPolicyStore storage.Interface,
 	caCertController *certificate.CACertController,
+	statsAggregator *stats.Aggregator,
 	controllerQuerier querier.ControllerQuerier,
 	endpointQuerier networkquery.EndpointQuerier) *Config {
 	return &Config{
@@ -111,6 +120,7 @@ func NewConfig(
 			appliedToGroupStore: appliedToGroupStore,
 			networkPolicyStore:  networkPolicyStore,
 			caCertController:    caCertController,
+			statsAggregator:     statsAggregator,
 			controllerQuerier:   controllerQuerier,
 			endpointQuerier:     endpointQuerier,
 		},
@@ -123,11 +133,14 @@ func (c *Config) Complete(informers informers.SharedInformerFactory) completedCo
 
 func installAPIGroup(s *APIServer, c completedConfig) error {
 	cpGroup := genericapiserver.NewDefaultAPIGroupInfo(controlplane.GroupName, Scheme, metav1.ParameterCodec, Codecs)
-	cpStorage := map[string]rest.Storage{}
-	cpStorage["addressgroups"] = addressgroup.NewREST(c.extraConfig.addressGroupStore)
-	cpStorage["appliedtogroups"] = appliedtogroup.NewREST(c.extraConfig.appliedToGroupStore)
-	cpStorage["networkpolicies"] = networkpolicy.NewREST(c.extraConfig.networkPolicyStore)
-	cpGroup.VersionedResourcesStorageMap["v1beta1"] = cpStorage
+	cpv1alpha1Storage := map[string]rest.Storage{}
+	cpv1alpha1Storage["nodestatssummaries"] = nodestatssummary.NewREST(c.extraConfig.statsAggregator)
+	cpGroup.VersionedResourcesStorageMap["v1alpha1"] = cpv1alpha1Storage
+	cpv1beta1Storage := map[string]rest.Storage{}
+	cpv1beta1Storage["addressgroups"] = addressgroup.NewREST(c.extraConfig.addressGroupStore)
+	cpv1beta1Storage["appliedtogroups"] = appliedtogroup.NewREST(c.extraConfig.appliedToGroupStore)
+	cpv1beta1Storage["networkpolicies"] = networkpolicy.NewREST(c.extraConfig.networkPolicyStore)
+	cpGroup.VersionedResourcesStorageMap["v1beta1"] = cpv1beta1Storage
 
 	systemGroup := genericapiserver.NewDefaultAPIGroupInfo(system.GroupName, Scheme, metav1.ParameterCodec, Codecs)
 	systemStorage := map[string]rest.Storage{}
@@ -137,7 +150,13 @@ func installAPIGroup(s *APIServer, c completedConfig) error {
 	systemStorage["supportbundles/download"] = bundleStorage.Download
 	systemGroup.VersionedResourcesStorageMap["v1beta1"] = systemStorage
 
-	groups := []*genericapiserver.APIGroupInfo{&cpGroup, &systemGroup}
+	metricsGroup := genericapiserver.NewDefaultAPIGroupInfo(metrics.GroupName, Scheme, metav1.ParameterCodec, Codecs)
+	metricsStorage := map[string]rest.Storage{}
+	metricsStorage["clusternetworkpolicymetrics"] = clusternetworkpolicymetrics.NewREST(c.extraConfig.statsAggregator)
+	metricsStorage["networkpolicymetrics"] = networkpolicymetrics.NewREST(c.extraConfig.statsAggregator)
+	metricsGroup.VersionedResourcesStorageMap["v1alpha1"] = metricsStorage
+
+	groups := []*genericapiserver.APIGroupInfo{&cpGroup, &systemGroup, &metricsGroup}
 	for _, apiGroupInfo := range groups {
 		if err := s.GenericAPIServer.InstallAPIGroup(apiGroupInfo); err != nil {
 			return err
@@ -166,7 +185,6 @@ func (c completedConfig) New() (*APIServer, error) {
 	}
 
 	installHandlers(c.extraConfig.endpointQuerier, s.GenericAPIServer)
-
 	return s, nil
 }
 

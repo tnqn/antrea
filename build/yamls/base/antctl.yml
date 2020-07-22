@@ -20,6 +20,14 @@ rules:
       - get
       - list
   - apiGroups:
+      - metrics.antrea.tanzu.vmware.com
+    resources:
+      - networkpolicymetrics
+      - clusternetworkpolicymetrics
+    verbs:
+      - get
+      - list
+  - apiGroups:
       - system.antrea.tanzu.vmware.com
     resources:
       - controllerinfos

@@ -337,7 +337,7 @@ func (data *TestData) getAgentContainersRestartCount() (int, error) {
 // waitForAntreaDaemonSetPods waits for the K8s apiserver to report that all the Antrea Pods are
 // available, i.e. all the Nodes have one or more of the Antrea daemon Pod running and available.
 func (data *TestData) waitForAntreaDaemonSetPods(timeout time.Duration) error {
-	err := wait.PollImmediate(1*time.Second, timeout, func() (bool, error) {
+	err := wait.Poll(1*time.Second, timeout, func() (bool, error) {
 		daemonSet, err := data.clientset.AppsV1().DaemonSets(antreaNamespace).Get(context.TODO(), antreaDaemonSet, metav1.GetOptions{})
 		if err != nil {
 			return false, fmt.Errorf("error when getting Antrea daemonset: %v", err)
