@@ -644,10 +644,9 @@ func (c *client) l3FlowsToPod(localGatewayMAC net.HardwareAddr, podInterfaceIP n
 	}
 	// Rewrite src MAC to local gateway MAC, and rewrite dst MAC to pod MAC
 	return flowBuilder.
+		MatchInPort(config.DefaultTunOFPort).
 		MatchDstIP(podInterfaceIP).
-		Action().SetSrcMAC(localGatewayMAC).
-		Action().SetDstMAC(podInterfaceMAC).
-		Action().DecTTL().
+		Action().SetDstMAC(localGatewayMAC).
 		Action().GotoTable(l3FwdTable.GetNext()).
 		Cookie(c.cookieAllocator.Request(category).Raw()).
 		Done()
@@ -698,11 +697,8 @@ func (c *client) l3FwdFlowToRemote(
 	tunOFPort uint32,
 	category cookie.Category) binding.Flow {
 	return c.pipeline[l3ForwardingTable].BuildFlow(priorityNormal).MatchProtocol(binding.ProtocolIP).
+		MatchInPort(config.HostGatewayOFPort).
 		MatchDstIPNet(peerSubnet).
-		Action().DecTTL().
-		// Rewrite src MAC to local gateway MAC and rewrite dst MAC to virtual MAC.
-		Action().SetSrcMAC(localGatewayMAC).
-		Action().SetDstMAC(globalVirtualMAC).
 		// Load ofport of the tunnel interface.
 		Action().LoadRegRange(int(portCacheReg), tunOFPort, ofPortRegRange).
 		// Set MAC-known.
