@@ -16,6 +16,7 @@ package store
 
 import (
 	"context"
+	"fmt"
 	"net"
 	"testing"
 
@@ -23,11 +24,14 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/labels"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/apimachinery/pkg/watch"
+	"k8s.io/client-go/tools/cache"
 
 	"github.com/vmware-tanzu/antrea/pkg/apis/networking"
 	"github.com/vmware-tanzu/antrea/pkg/apiserver/storage"
+	"github.com/vmware-tanzu/antrea/pkg/apiserver/storage/ram"
 	"github.com/vmware-tanzu/antrea/pkg/controller/types"
 )
 
@@ -162,4 +166,127 @@ func TestWatchAddressGroupEvent(t *testing.T) {
 			}
 		})
 	}
+}
+
+func benchmarkCreateAndUpdateAddressGroup(b *testing.B, withPodIndex bool, scale int) {
+	pods1 := newPodSet(scale, 50, 10)
+	pods2 := newPodSet(scale, 50, 11)
+	group1 := &types.AddressGroup{
+		UID:      "foo",
+		Name:     "bar",
+		Selector: types.GroupSelector{},
+		Pods:     pods1,
+	}
+	group2 := &types.AddressGroup{
+		UID:      "foo",
+		Name:     "bar",
+		Selector: types.GroupSelector{},
+		Pods:     pods2,
+	}
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		store := newStore(withPodIndex)
+		store.Create(group1)
+		store.Update(group2)
+	}
+}
+
+func benchmarkCreateAddressGroup(b *testing.B, withPodIndex bool, scale int) {
+	pods1 := newPodSet(scale, 50, 10)
+	group1 := &types.AddressGroup{
+		UID:      "foo",
+		Name:     "bar",
+		Selector: types.GroupSelector{},
+		Pods:     pods1,
+	}
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		store := newStore(withPodIndex)
+		store.Create(group1)
+	}
+}
+
+func newStore(withPodIndex bool) storage.Interface {
+	indexers := cache.Indexers{
+		cache.NamespaceIndex: func(obj interface{}) ([]string, error) {
+			ag, ok := obj.(*types.AddressGroup)
+			if !ok {
+				return []string{}, nil
+			}
+			// ag.Selector.Namespace == "" means it's a cluster scoped group, we index it as it is.
+			return []string{ag.Selector.Namespace}, nil
+		},
+	}
+	if withPodIndex {
+		indexers["pod"] = func(obj interface{}) ([]string, error) {
+			ag, ok := obj.(*types.AddressGroup)
+			if !ok {
+				return []string{}, nil
+			}
+			keys := make([]string, 0)
+			for _, pod := range ag.Pods {
+				if pod != nil && pod.Pod != nil {
+					name, namespace := pod.Pod.Name, pod.Pod.Namespace
+					keys = append(keys, name+"/"+namespace)
+				}
+			}
+			return keys, nil
+		}
+	}
+	return ram.NewStore(AddressGroupKeyFunc, indexers, genAddressGroupEvent, keyAndSpanSelectFunc, func() runtime.Object { return new(networking.AddressGroup) })
+}
+
+func newPodSet(i, j, k int) networking.GroupMemberPodSet {
+	pods := networking.NewGroupMemberPodSet()
+	for i1 := 1; i1 <= i; i1++ {
+		for i2 := 1; i2 <= j; i2++ {
+			for i3 := 1; i3 <= k; i3++ {
+				pod := &networking.GroupMemberPod{
+					Pod: &networking.PodReference{
+						Name:      fmt.Sprintf("pod-%d-%d-%d", i1, i2, i3),
+						Namespace: "foo",
+					},
+					IP: networking.IPAddress(net.ParseIP(fmt.Sprintf("1.%d.%d.%d", i1, i2, i3))),
+				}
+				pods.Insert(pod)
+			}
+		}
+	}
+	return pods
+}
+
+// 50,000 Pods in this group.
+func BenchmarkCreateAndUpdateLargeAddressGroupWithPodIndex(b *testing.B) {
+	benchmarkCreateAndUpdateAddressGroup(b, true, 100)
+}
+
+func BenchmarkCreateAndUpdateLargeAddressGroupWithoutPodIndex(b *testing.B) {
+	benchmarkCreateAndUpdateAddressGroup(b, false, 100)
+}
+
+func BenchmarkCreateLargeAddressGroupWithPodIndex(b *testing.B) {
+	benchmarkCreateAddressGroup(b, true, 100)
+}
+
+func BenchmarkCreateLargeAddressGroupWithoutPodIndex(b *testing.B) {
+	benchmarkCreateAddressGroup(b, false, 100)
+}
+
+// 500 Pods in this group.
+func BenchmarkCreateAndUpdateSmallAddressGroupWithPodIndex(b *testing.B) {
+	benchmarkCreateAndUpdateAddressGroup(b, true, 1)
+}
+
+func BenchmarkCreateAndUpdateSmallAddressGroupWithoutPodIndex(b *testing.B) {
+	benchmarkCreateAndUpdateAddressGroup(b, false, 1)
+}
+
+func BenchmarkCreateSmallAddressGroupWithPodIndex(b *testing.B) {
+	benchmarkCreateAddressGroup(b, true, 1)
+}
+
+func BenchmarkCreateSmallAddressGroupWithoutPodIndex(b *testing.B) {
+	benchmarkCreateAddressGroup(b, false, 1)
 }
