@@ -157,9 +157,14 @@ func TestAddNetworkPolicy(t *testing.T) {
 				},
 			},
 			expPolicy: &antreatypes.NetworkPolicy{
-				UID:       "uidA",
-				Name:      "npA",
-				Namespace: "nsA",
+				UID:  "uidA",
+				Name: "uidA",
+				SourceRef: &controlplane.NetworkPolicyReference{
+					Type:      controlplane.K8sNetworkPolicy,
+					Namespace: "nsA",
+					Name:      "npA",
+					UID:       "uidA",
+				},
 				Rules: []controlplane.NetworkPolicyRule{{
 					Direction: controlplane.DirectionIn,
 					From:      matchAllPeer,
@@ -183,9 +188,14 @@ func TestAddNetworkPolicy(t *testing.T) {
 				},
 			},
 			expPolicy: &antreatypes.NetworkPolicy{
-				UID:       "uidB",
-				Name:      "npB",
-				Namespace: "nsA",
+				UID:  "uidB",
+				Name: "uidB",
+				SourceRef: &controlplane.NetworkPolicyReference{
+					Type:      controlplane.K8sNetworkPolicy,
+					Namespace: "nsA",
+					Name:      "npB",
+					UID:       "uidB",
+				},
 				Rules: []controlplane.NetworkPolicyRule{{
 					Direction: controlplane.DirectionOut,
 					To:        matchAllPeer,
@@ -218,9 +228,14 @@ func TestAddNetworkPolicy(t *testing.T) {
 				},
 			},
 			expPolicy: &antreatypes.NetworkPolicy{
-				UID:       "uidB",
-				Name:      "npB",
-				Namespace: "nsA",
+				UID:  "uidB",
+				Name: "uidB",
+				SourceRef: &controlplane.NetworkPolicyReference{
+					Type:      controlplane.K8sNetworkPolicy,
+					Namespace: "nsA",
+					Name:      "npB",
+					UID:       "uidB",
+				},
 				Rules: []controlplane.NetworkPolicyRule{{
 					Direction: controlplane.DirectionOut,
 					To:        matchAllPeerEgress,
@@ -248,9 +263,14 @@ func TestAddNetworkPolicy(t *testing.T) {
 				},
 			},
 			expPolicy: &antreatypes.NetworkPolicy{
-				UID:       "uidC",
-				Name:      "npC",
-				Namespace: "nsA",
+				UID:  "uidC",
+				Name: "uidC",
+				SourceRef: &controlplane.NetworkPolicyReference{
+					Type:      controlplane.K8sNetworkPolicy,
+					Namespace: "nsA",
+					Name:      "npC",
+					UID:       "uidC",
+				},
 				Rules: []controlplane.NetworkPolicyRule{
 					denyAllIngressRule,
 				},
@@ -269,9 +289,14 @@ func TestAddNetworkPolicy(t *testing.T) {
 				},
 			},
 			expPolicy: &antreatypes.NetworkPolicy{
-				UID:       "uidD",
-				Name:      "npD",
-				Namespace: "nsA",
+				UID:  "uidD",
+				Name: "uidD",
+				SourceRef: &controlplane.NetworkPolicyReference{
+					Type:      controlplane.K8sNetworkPolicy,
+					Namespace: "nsA",
+					Name:      "npD",
+					UID:       "uidD",
+				},
 				Rules: []controlplane.NetworkPolicyRule{
 					denyAllEgressRule,
 				},
@@ -319,9 +344,14 @@ func TestAddNetworkPolicy(t *testing.T) {
 				},
 			},
 			expPolicy: &antreatypes.NetworkPolicy{
-				UID:       "uidE",
-				Name:      "npE",
-				Namespace: "nsA",
+				UID:  "uidE",
+				Name: "uidE",
+				SourceRef: &controlplane.NetworkPolicyReference{
+					Type:      controlplane.K8sNetworkPolicy,
+					Namespace: "nsA",
+					Name:      "npE",
+					UID:       "uidE",
+				},
 				Rules: []controlplane.NetworkPolicyRule{
 					{
 						Direction: controlplane.DirectionIn,
@@ -392,9 +422,14 @@ func TestAddNetworkPolicy(t *testing.T) {
 				},
 			},
 			expPolicy: &antreatypes.NetworkPolicy{
-				UID:       "uidF",
-				Name:      "npF",
-				Namespace: "nsA",
+				UID:  "uidF",
+				Name: "uidF",
+				SourceRef: &controlplane.NetworkPolicyReference{
+					Type:      controlplane.K8sNetworkPolicy,
+					Namespace: "nsA",
+					Name:      "npF",
+					UID:       "uidF",
+				},
 				Rules: []controlplane.NetworkPolicyRule{
 					{
 						Direction: controlplane.DirectionIn,
@@ -435,20 +470,11 @@ func TestAddNetworkPolicy(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			_, npc := newController()
 			npc.addNetworkPolicy(tt.inputPolicy)
-			key, _ := keyFunc(tt.inputPolicy)
-			actualPolicyObj, _, _ := npc.internalNetworkPolicyStore.Get(key)
+			actualPolicyObj, _, _ := npc.internalNetworkPolicyStore.Get(internalNetworkPolicyKeyFunc(tt.inputPolicy))
 			actualPolicy := actualPolicyObj.(*antreatypes.NetworkPolicy)
-			if !reflect.DeepEqual(actualPolicy, tt.expPolicy) {
-				t.Errorf("addNetworkPolicy() got %v, want %v", actualPolicy, tt.expPolicy)
-			}
-
-			if actualAddressGroups := len(npc.addressGroupStore.List()); actualAddressGroups != tt.expAddressGroups {
-				t.Errorf("len(addressGroupStore.List()) got %v, want %v", actualAddressGroups, tt.expAddressGroups)
-			}
-
-			if actualAppliedToGroups := len(npc.appliedToGroupStore.List()); actualAppliedToGroups != tt.expAppliedToGroups {
-				t.Errorf("len(appliedToGroupStore.List()) got %v, want %v", actualAppliedToGroups, tt.expAppliedToGroups)
-			}
+			assert.Equal(t, tt.expPolicy, actualPolicy)
+			assert.Equal(t, tt.expAddressGroups, len(npc.addressGroupStore.List()))
+			assert.Equal(t, tt.expAppliedToGroups, len(npc.appliedToGroupStore.List()))
 		})
 	}
 	_, npc := newController()
@@ -473,8 +499,7 @@ func TestDeleteNetworkPolicy(t *testing.T) {
 	assert.False(t, found, "expected AppliedToGroup to be deleted")
 	adgs := npc.addressGroupStore.List()
 	assert.Len(t, adgs, 0, "expected empty AddressGroup list")
-	key, _ := keyFunc(npObj)
-	_, found, _ = npc.internalNetworkPolicyStore.Get(key)
+	_, found, _ = npc.internalNetworkPolicyStore.Get(internalNetworkPolicyKeyFunc(npObj))
 	assert.False(t, found, "expected internal NetworkPolicy to be deleted")
 }
 
@@ -542,9 +567,14 @@ func TestUpdateNetworkPolicy(t *testing.T) {
 				},
 			},
 			expNetworkPolicy: &antreatypes.NetworkPolicy{
-				UID:       "uidA",
-				Name:      "npA",
-				Namespace: "nsA",
+				UID:  "uidA",
+				Name: "uidA",
+				SourceRef: &controlplane.NetworkPolicyReference{
+					Type:      controlplane.K8sNetworkPolicy,
+					Namespace: "nsA",
+					Name:      "npA",
+					UID:       "uidA",
+				},
 				Rules: []controlplane.NetworkPolicyRule{
 					{
 						Direction: controlplane.DirectionIn,
@@ -587,9 +617,14 @@ func TestUpdateNetworkPolicy(t *testing.T) {
 				},
 			},
 			expNetworkPolicy: &antreatypes.NetworkPolicy{
-				UID:       "uidA",
-				Name:      "npA",
-				Namespace: "nsA",
+				UID:  "uidA",
+				Name: "uidA",
+				SourceRef: &controlplane.NetworkPolicyReference{
+					Type:      controlplane.K8sNetworkPolicy,
+					Namespace: "nsA",
+					Name:      "npA",
+					UID:       "uidA",
+				},
 				Rules: []controlplane.NetworkPolicyRule{
 					{
 						Direction: controlplane.DirectionOut,
@@ -624,9 +659,14 @@ func TestUpdateNetworkPolicy(t *testing.T) {
 				},
 			},
 			expNetworkPolicy: &antreatypes.NetworkPolicy{
-				UID:       "uidA",
-				Name:      "npA",
-				Namespace: "nsA",
+				UID:  "uidA",
+				Name: "uidA",
+				SourceRef: &controlplane.NetworkPolicyReference{
+					Type:      controlplane.K8sNetworkPolicy,
+					Namespace: "nsA",
+					Name:      "npA",
+					UID:       "uidA",
+				},
 				Rules: []controlplane.NetworkPolicyRule{
 					{
 						Direction: controlplane.DirectionIn,
@@ -651,9 +691,14 @@ func TestUpdateNetworkPolicy(t *testing.T) {
 				},
 			},
 			expNetworkPolicy: &antreatypes.NetworkPolicy{
-				UID:             "uidA",
-				Name:            "npA",
-				Namespace:       "nsA",
+				UID:  "uidA",
+				Name: "uidA",
+				SourceRef: &controlplane.NetworkPolicyReference{
+					Type:      controlplane.K8sNetworkPolicy,
+					Namespace: "nsA",
+					Name:      "npA",
+					UID:       "uidA",
+				},
 				Rules:           []controlplane.NetworkPolicyRule{},
 				AppliedToGroups: []string{getNormalizedUID(toGroupSelector("nsA", &metav1.LabelSelector{}, nil, nil).NormalizedName)},
 			},
@@ -695,9 +740,14 @@ func TestUpdateNetworkPolicy(t *testing.T) {
 				},
 			},
 			expNetworkPolicy: &antreatypes.NetworkPolicy{
-				UID:       "uidA",
-				Name:      "npA",
-				Namespace: "nsA",
+				UID:  "uidA",
+				Name: "uidA",
+				SourceRef: &controlplane.NetworkPolicyReference{
+					Type:      controlplane.K8sNetworkPolicy,
+					Namespace: "nsA",
+					Name:      "npA",
+					UID:       "uidA",
+				},
 				Rules: []controlplane.NetworkPolicyRule{
 					{
 						Direction: controlplane.DirectionIn,
@@ -757,9 +807,14 @@ func TestUpdateNetworkPolicy(t *testing.T) {
 				},
 			},
 			expNetworkPolicy: &antreatypes.NetworkPolicy{
-				UID:       "uidA",
-				Name:      "npA",
-				Namespace: "nsA",
+				UID:  "uidA",
+				Name: "uidA",
+				SourceRef: &controlplane.NetworkPolicyReference{
+					Type:      controlplane.K8sNetworkPolicy,
+					Namespace: "nsA",
+					Name:      "npA",
+					UID:       "uidA",
+				},
 				Rules: []controlplane.NetworkPolicyRule{
 					{
 						Direction: controlplane.DirectionIn,
@@ -789,8 +844,7 @@ func TestUpdateNetworkPolicy(t *testing.T) {
 			_, npc := newController()
 			npc.addNetworkPolicy(oldNP)
 			npc.updateNetworkPolicy(oldNP, tt.updatedNetworkPolicy)
-			key, _ := keyFunc(oldNP)
-			actualPolicyObj, _, _ := npc.internalNetworkPolicyStore.Get(key)
+			actualPolicyObj, _, _ := npc.internalNetworkPolicyStore.Get(internalNetworkPolicyKeyFunc(oldNP))
 			actualPolicy := actualPolicyObj.(*antreatypes.NetworkPolicy)
 			if actualAppliedToGroups := len(npc.appliedToGroupStore.List()); actualAppliedToGroups != tt.expAppliedToGroups {
 				t.Errorf("updateNetworkPolicy() got %v, want %v", actualAppliedToGroups, tt.expAppliedToGroups)
@@ -2383,9 +2437,14 @@ func TestProcessNetworkPolicy(t *testing.T) {
 				},
 			},
 			expectedPolicy: &antreatypes.NetworkPolicy{
-				UID:       "uidA",
-				Name:      "npA",
-				Namespace: "nsA",
+				UID:  "uidA",
+				Name: "uidA",
+				SourceRef: &controlplane.NetworkPolicyReference{
+					Type:      controlplane.K8sNetworkPolicy,
+					Namespace: "nsA",
+					Name:      "npA",
+					UID:       "uidA",
+				},
 				Rules: []controlplane.NetworkPolicyRule{{
 					Direction: controlplane.DirectionIn,
 					From:      matchAllPeer,
@@ -2408,9 +2467,14 @@ func TestProcessNetworkPolicy(t *testing.T) {
 				},
 			},
 			expectedPolicy: &antreatypes.NetworkPolicy{
-				UID:             "uidA",
-				Name:            "npA",
-				Namespace:       "nsA",
+				UID:  "uidA",
+				Name: "uidA",
+				SourceRef: &controlplane.NetworkPolicyReference{
+					Type:      controlplane.K8sNetworkPolicy,
+					Namespace: "nsA",
+					Name:      "npA",
+					UID:       "uidA",
+				},
 				Rules:           []controlplane.NetworkPolicyRule{denyAllEgressRule},
 				AppliedToGroups: []string{getNormalizedUID(toGroupSelector("nsA", &metav1.LabelSelector{}, nil, nil).NormalizedName)},
 			},
@@ -2456,9 +2520,14 @@ func TestProcessNetworkPolicy(t *testing.T) {
 				},
 			},
 			expectedPolicy: &antreatypes.NetworkPolicy{
-				UID:       "uidA",
-				Name:      "npA",
-				Namespace: "nsA",
+				UID:  "uidA",
+				Name: "uidA",
+				SourceRef: &controlplane.NetworkPolicyReference{
+					Type:      controlplane.K8sNetworkPolicy,
+					Namespace: "nsA",
+					Name:      "npA",
+					UID:       "uidA",
+				},
 				Rules: []controlplane.NetworkPolicyRule{
 					{
 						Direction: controlplane.DirectionIn,
@@ -2529,9 +2598,14 @@ func TestProcessNetworkPolicy(t *testing.T) {
 				},
 			},
 			expectedPolicy: &antreatypes.NetworkPolicy{
-				UID:       "uidA",
-				Name:      "npA",
-				Namespace: "nsA",
+				UID:  "uidA",
+				Name: "uidA",
+				SourceRef: &controlplane.NetworkPolicyReference{
+					Type:      controlplane.K8sNetworkPolicy,
+					Namespace: "nsA",
+					Name:      "npA",
+					UID:       "uidA",
+				},
 				Rules: []controlplane.NetworkPolicyRule{
 					{
 						Direction: controlplane.DirectionIn,

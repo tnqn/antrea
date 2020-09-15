@@ -106,7 +106,7 @@ func NewNetworkPolicyController(antreaClientGetter agent.AntreaClientProvider,
 			if err != nil {
 				return nil, err
 			}
-			return antreaClient.ControlplaneV1beta1().NetworkPolicies("").Watch(context.TODO(), options)
+			return antreaClient.ControlplaneV1beta1().NetworkPolicies().Watch(context.TODO(), options)
 		},
 		AddFunc: func(obj runtime.Object) error {
 			policy, ok := obj.(*v1beta1.NetworkPolicy)
@@ -114,7 +114,7 @@ func NewNetworkPolicyController(antreaClientGetter agent.AntreaClientProvider,
 				return fmt.Errorf("cannot convert to *v1beta1.NetworkPolicy: %v", obj)
 			}
 			c.ruleCache.AddNetworkPolicy(policy)
-			klog.Infof("NetworkPolicy %s/%s applied to Pods on this Node", policy.Namespace, policy.Name)
+			klog.Infof("NetworkPolicy %s applied to Pods on this Node", policy.SourceRef.ToString())
 			return nil
 		},
 		UpdateFunc: func(obj runtime.Object) error {
@@ -131,7 +131,7 @@ func NewNetworkPolicyController(antreaClientGetter agent.AntreaClientProvider,
 				return fmt.Errorf("cannot convert to *v1beta1.NetworkPolicy: %v", obj)
 			}
 			c.ruleCache.DeleteNetworkPolicy(policy)
-			klog.Infof("NetworkPolicy %s/%s no longer applied to Pods on this Node", policy.Namespace, policy.Name)
+			klog.Infof("NetworkPolicy %s no longer applied to Pods on this Node", policy.SourceRef.ToString())
 			return nil
 		},
 		ReplaceFunc: func(objs []runtime.Object) error {
@@ -142,7 +142,7 @@ func NewNetworkPolicyController(antreaClientGetter agent.AntreaClientProvider,
 				if !ok {
 					return fmt.Errorf("cannot convert to *v1beta1.NetworkPolicy: %v", objs[i])
 				}
-				klog.Infof("NetworkPolicy %s/%s applied to Pods on this Node", policies[i].Namespace, policies[i].Name)
+				klog.Infof("NetworkPolicy %s applied to Pods on this Node", policies[i].SourceRef.ToString())
 			}
 			c.ruleCache.ReplaceNetworkPolicies(policies)
 			return nil

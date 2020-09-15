@@ -19,6 +19,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
 
@@ -91,9 +92,14 @@ func TestProcessAntreaNetworkPolicy(t *testing.T) {
 				},
 			},
 			expectedPolicy: &antreatypes.NetworkPolicy{
-				UID:          "uidA",
-				Name:         "npA",
-				Namespace:    "ns1",
+				UID:  "uidA",
+				Name: "uidA",
+				SourceRef: &controlplane.NetworkPolicyReference{
+					Type:      controlplane.AntreaNetworkPolicy,
+					Namespace: "ns1",
+					Name:      "npA",
+					UID:       "uidA",
+				},
 				Priority:     &p10,
 				TierPriority: &appTier,
 				Rules: []controlplane.NetworkPolicyRule{
@@ -171,9 +177,14 @@ func TestProcessAntreaNetworkPolicy(t *testing.T) {
 				},
 			},
 			expectedPolicy: &antreatypes.NetworkPolicy{
-				UID:          "uidB",
-				Name:         "npB",
-				Namespace:    "ns2",
+				UID:  "uidB",
+				Name: "uidB",
+				SourceRef: &controlplane.NetworkPolicyReference{
+					Type:      controlplane.AntreaNetworkPolicy,
+					Namespace: "ns2",
+					Name:      "npB",
+					UID:       "uidB",
+				},
 				Priority:     &p10,
 				TierPriority: &appTier,
 				Rules: []controlplane.NetworkPolicyRule{
@@ -278,9 +289,14 @@ func TestAddANP(t *testing.T) {
 				},
 			},
 			expPolicy: &antreatypes.NetworkPolicy{
-				UID:          "uidA",
-				Name:         "anpA",
-				Namespace:    "nsA",
+				UID:  "uidA",
+				Name: "uidA",
+				SourceRef: &controlplane.NetworkPolicyReference{
+					Type:      controlplane.AntreaNetworkPolicy,
+					Namespace: "nsA",
+					Name:      "anpA",
+					UID:       "uidA",
+				},
 				Priority:     &p10,
 				TierPriority: &appTier,
 				Rules: []controlplane.NetworkPolicyRule{
@@ -309,8 +325,8 @@ func TestAddANP(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			_, npc := newController()
 			npc.addANP(tt.inputPolicy)
-			key, _ := keyFunc(tt.inputPolicy)
-			actualPolicyObj, _, _ := npc.internalNetworkPolicyStore.Get(key)
+			actualPolicyObj, exists, _ := npc.internalNetworkPolicyStore.Get(internalNetworkPolicyKeyFunc(tt.inputPolicy))
+			require.True(t, exists)
 			actualPolicy := actualPolicyObj.(*antreatypes.NetworkPolicy)
 			if !reflect.DeepEqual(actualPolicy, tt.expPolicy) {
 				t.Errorf("addANP() got %v, want %v", actualPolicy, tt.expPolicy)
@@ -371,7 +387,7 @@ func getANP() *secv1alpha1.NetworkPolicy {
 		},
 	}
 	npObj := &secv1alpha1.NetworkPolicy{
-		ObjectMeta: metav1.ObjectMeta{Namespace: "test-ns", Name: "test-anp"},
+		ObjectMeta: metav1.ObjectMeta{Namespace: "test-ns", Name: "test-anp", UID: "test-id"},
 		Spec: secv1alpha1.NetworkPolicySpec{
 			AppliedTo: []secv1alpha1.NetworkPolicyPeer{
 				{PodSelector: &selectorA},

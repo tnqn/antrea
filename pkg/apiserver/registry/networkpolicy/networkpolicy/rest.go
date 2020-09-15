@@ -78,32 +78,22 @@ func (r *REST) Get(ctx context.Context, name string, options *metav1.GetOptions)
 }
 
 func (r *REST) List(ctx context.Context, options *internalversion.ListOptions) (runtime.Object, error) {
-	ns, namespaceScoped := request.NamespaceFrom(ctx)
 	networkPolicies := r.networkPolicyStore.List()
-	list := new(controlplane.NetworkPolicyList)
+	list := &controlplane.NetworkPolicyList{
+		Items: make([]controlplane.NetworkPolicy, len(networkPolicies)),
+	}
 	for i := range networkPolicies {
-		if !namespaceScoped || len(ns) == 0 || networkPolicies[i].(*types.NetworkPolicy).Namespace == ns {
-			policy := controlplane.NetworkPolicy{}
-			store.ToNetworkPolicyMsg(networkPolicies[i].(*types.NetworkPolicy), &policy, true)
-			list.Items = append(list.Items, policy)
-		}
+		store.ToNetworkPolicyMsg(networkPolicies[i].(*types.NetworkPolicy), &list.Items[i], true)
 	}
 	return list, nil
 }
 
 func (r *REST) NamespaceScoped() bool {
-	return true
+	return false
 }
 
 func (r *REST) Watch(ctx context.Context, options *internalversion.ListOptions) (watch.Interface, error) {
 	key, label, field := networkpolicy.GetSelectors(options)
-	if len(key) > 0 {
-		ns, ok := request.NamespaceFrom(ctx)
-		if !ok || len(ns) == 0 {
-			return nil, errors.NewBadRequest("Namespace parameter required.")
-		}
-		key = k8s.NamespacedName(ns, key)
-	}
 	return r.networkPolicyStore.Watch(ctx, key, label, field)
 }
 

@@ -132,15 +132,34 @@ func newAddressGroupMemberPod(ip string) *v1beta1.GroupMemberPod {
 	return &v1beta1.GroupMemberPod{IP: v1beta1.IPAddress(net.ParseIP(ip))}
 }
 
+func newRule(id string,
+	policyType v1beta1.NetworkPolicyType,
+	policyNamespace string,
+	policyName string,
+	policyUID types.UID,
+	fromGroups []string,
+	toGroups []string,
+	appliedToGroups []string,
+	direction v1beta1.Direction,
+) *rule {
+	return &rule{
+		ID: id,
+		PolicyRef: &v1beta1.NetworkPolicyReference{
+			Type:      policyType,
+			Namespace: policyNamespace,
+			Name:      policyName,
+			UID:       policyUID,
+		},
+		Direction:       direction,
+		From:            v1beta1.NetworkPolicyPeer{AddressGroups: fromGroups},
+		To:              v1beta1.NetworkPolicyPeer{AddressGroups: toGroups},
+		AppliedToGroups: appliedToGroups,
+	}
+}
+
 func TestRuleCacheAddAddressGroup(t *testing.T) {
-	rule1 := &rule{
-		ID:   "rule1",
-		From: v1beta1.NetworkPolicyPeer{AddressGroups: []string{"group1"}},
-	}
-	rule2 := &rule{
-		ID:   "rule2",
-		From: v1beta1.NetworkPolicyPeer{AddressGroups: []string{"group1", "group2"}},
-	}
+	rule1 := newRule("rule1", v1beta1.K8sNetworkPolicy, "ns1", "np1", "id1", []string{"group1"}, nil, nil, v1beta1.DirectionIn)
+	rule2 := newRule("rule2", v1beta1.K8sNetworkPolicy, "ns1", "np1", "id1", []string{"group1", "group2"}, nil, nil, v1beta1.DirectionIn)
 	tests := []struct {
 		name               string
 		rules              []*rule
@@ -207,14 +226,8 @@ func newFakeRuleCache() (*ruleCache, *dirtyRuleRecorder, chan v1beta1.PodReferen
 }
 
 func TestRuleCacheReplaceAppliedToGroups(t *testing.T) {
-	rule1 := &rule{
-		ID:              "rule1",
-		AppliedToGroups: []string{"group1"},
-	}
-	rule2 := &rule{
-		ID:              "rule2",
-		AppliedToGroups: []string{"group1", "group2"},
-	}
+	rule1 := newRule("rule1", v1beta1.K8sNetworkPolicy, "ns1", "np1", "id1", nil, nil, []string{"group1"}, v1beta1.DirectionIn)
+	rule2 := newRule("rule2", v1beta1.K8sNetworkPolicy, "ns1", "np1", "id1", nil, nil, []string{"group1", "group2"}, v1beta1.DirectionIn)
 	tests := []struct {
 		name               string
 		rules              []*rule
@@ -291,14 +304,8 @@ func TestRuleCacheReplaceAppliedToGroups(t *testing.T) {
 }
 
 func TestRuleCacheReplaceAddressGroups(t *testing.T) {
-	rule1 := &rule{
-		ID:   "rule1",
-		From: v1beta1.NetworkPolicyPeer{AddressGroups: []string{"group1"}},
-	}
-	rule2 := &rule{
-		ID:   "rule2",
-		From: v1beta1.NetworkPolicyPeer{AddressGroups: []string{"group1", "group2"}},
-	}
+	rule1 := newRule("rule1", v1beta1.K8sNetworkPolicy, "ns1", "np1", "id1", []string{"group1"}, nil, nil, v1beta1.DirectionIn)
+	rule2 := newRule("rule2", v1beta1.K8sNetworkPolicy, "ns1", "np1", "id1", []string{"group1", "group2"}, nil, nil, v1beta1.DirectionIn)
 	tests := []struct {
 		name               string
 		rules              []*rule
@@ -385,11 +392,23 @@ func TestRuleCacheReplaceNetworkPolicies(t *testing.T) {
 		ObjectMeta:      metav1.ObjectMeta{UID: "policy1"},
 		Rules:           []v1beta1.NetworkPolicyRule{*networkPolicyRule1},
 		AppliedToGroups: []string{"addressGroup1"},
+		SourceRef: &v1beta1.NetworkPolicyReference{
+			Type:      v1beta1.K8sNetworkPolicy,
+			Namespace: "ns1",
+			Name:      "name1",
+			UID:       "policy1",
+		},
 	}
 	networkPolicy2 := &v1beta1.NetworkPolicy{
 		ObjectMeta:      metav1.ObjectMeta{UID: "policy1"},
 		Rules:           []v1beta1.NetworkPolicyRule{*networkPolicyRule1},
 		AppliedToGroups: []string{"addressGroup2"},
+		SourceRef: &v1beta1.NetworkPolicyReference{
+			Type:      v1beta1.K8sNetworkPolicy,
+			Namespace: "ns1",
+			Name:      "name1",
+			UID:       "policy1",
+		},
 	}
 	rule1 := toRule(networkPolicyRule1, networkPolicy1)
 	rule2 := toRule(networkPolicyRule1, networkPolicy2)
@@ -434,7 +453,6 @@ func TestRuleCacheReplaceNetworkPolicies(t *testing.T) {
 			c, recorder, _ := newFakeRuleCache()
 			for _, rule := range tt.rules {
 				c.rules.Add(rule)
-				c.policyMap[string(rule.PolicyUID)] = &types.NamespacedName{Namespace: rule.PolicyNamespace, Name: rule.PolicyName}
 			}
 			c.ReplaceNetworkPolicies(tt.args)
 
@@ -447,14 +465,8 @@ func TestRuleCacheReplaceNetworkPolicies(t *testing.T) {
 }
 
 func TestRuleCacheAddAppliedToGroup(t *testing.T) {
-	rule1 := &rule{
-		ID:              "rule1",
-		AppliedToGroups: []string{"group1"},
-	}
-	rule2 := &rule{
-		ID:              "rule2",
-		AppliedToGroups: []string{"group1", "group2"},
-	}
+	rule1 := newRule("rule1", v1beta1.K8sNetworkPolicy, "ns1", "np1", "id1", nil, nil, []string{"group1"}, v1beta1.DirectionIn)
+	rule2 := newRule("rule2", v1beta1.K8sNetworkPolicy, "ns1", "np1", "id1", nil, nil, []string{"group1", "group2"}, v1beta1.DirectionIn)
 	tests := []struct {
 		name               string
 		rules              []*rule
@@ -527,14 +539,26 @@ func TestRuleCacheAddNetworkPolicy(t *testing.T) {
 		Services:  nil,
 	}
 	networkPolicy1 := &v1beta1.NetworkPolicy{
-		ObjectMeta:      metav1.ObjectMeta{UID: "policy1", Namespace: "ns1", Name: "name1"},
+		ObjectMeta:      metav1.ObjectMeta{UID: "policy1", Name: "policy1"},
 		Rules:           nil,
 		AppliedToGroups: []string{"appliedToGroup1"},
+		SourceRef: &v1beta1.NetworkPolicyReference{
+			Type:      v1beta1.K8sNetworkPolicy,
+			Namespace: "ns1",
+			Name:      "name1",
+			UID:       "policy1",
+		},
 	}
 	networkPolicy2 := &v1beta1.NetworkPolicy{
-		ObjectMeta:      metav1.ObjectMeta{UID: "policy2", Namespace: "ns2", Name: "name2"},
+		ObjectMeta:      metav1.ObjectMeta{UID: "policy2", Name: "policy2"},
 		Rules:           []v1beta1.NetworkPolicyRule{*networkPolicyRule1, *networkPolicyRule2},
 		AppliedToGroups: []string{"appliedToGroup1"},
+		SourceRef: &v1beta1.NetworkPolicyReference{
+			Type:      v1beta1.K8sNetworkPolicy,
+			Namespace: "ns2",
+			Name:      "name2",
+			UID:       "policy2",
+		},
 	}
 	rule1 := toRule(networkPolicyRule1, networkPolicy2)
 	rule2 := toRule(networkPolicyRule2, networkPolicy2)
@@ -574,16 +598,22 @@ func TestRuleCacheAddNetworkPolicy(t *testing.T) {
 
 func TestRuleCacheDeleteNetworkPolicy(t *testing.T) {
 	rule1 := &rule{
-		ID:        "rule1",
-		PolicyUID: "policy1",
+		ID: "rule1",
+		PolicyRef: &v1beta1.NetworkPolicyReference{
+			UID: "policy1",
+		},
 	}
 	rule2 := &rule{
-		ID:        "rule2",
-		PolicyUID: "policy2",
+		ID: "rule2",
+		PolicyRef: &v1beta1.NetworkPolicyReference{
+			UID: "policy2",
+		},
 	}
 	rule3 := &rule{
-		ID:        "rule3",
-		PolicyUID: "policy2",
+		ID: "rule3",
+		PolicyRef: &v1beta1.NetworkPolicyReference{
+			UID: "policy2",
+		},
 	}
 	tests := []struct {
 		name               string
@@ -644,24 +674,9 @@ func TestRuleCacheGetCompletedRule(t *testing.T) {
 	addressGroup2 := v1beta1.NewGroupMemberSet(newAddressGroupMember("1.1.1.3"), newAddressGroupMember("1.1.1.2"))
 	appliedToGroup1 := v1beta1.NewGroupMemberPodSet(newAppliedToGroupMember("pod1", "ns1"), newAppliedToGroupMember("pod2", "ns1"))
 	appliedToGroup2 := v1beta1.NewGroupMemberPodSet(newAppliedToGroupMember("pod3", "ns1"), newAppliedToGroupMember("pod2", "ns1"))
-	rule1 := &rule{
-		ID:              "rule1",
-		Direction:       v1beta1.DirectionIn,
-		From:            v1beta1.NetworkPolicyPeer{AddressGroups: []string{"addressGroup1"}},
-		AppliedToGroups: []string{"appliedToGroup1"},
-	}
-	rule2 := &rule{
-		ID:              "rule2",
-		Direction:       v1beta1.DirectionOut,
-		To:              v1beta1.NetworkPolicyPeer{AddressGroups: []string{"addressGroup1", "addressGroup2"}},
-		AppliedToGroups: []string{"appliedToGroup1", "appliedToGroup2"},
-	}
-	rule3 := &rule{
-		ID:              "rule3",
-		Direction:       v1beta1.DirectionIn,
-		From:            v1beta1.NetworkPolicyPeer{AddressGroups: []string{"addressGroup1", "addressGroup2", "addressGroup3"}},
-		AppliedToGroups: []string{"appliedToGroup1", "appliedToGroup2"},
-	}
+	rule1 := newRule("rule1", v1beta1.K8sNetworkPolicy, "", "", "", []string{"addressGroup1"}, nil, []string{"appliedToGroup1"}, v1beta1.DirectionIn)
+	rule2 := newRule("rule2", v1beta1.K8sNetworkPolicy, "", "", "", nil, []string{"addressGroup1", "addressGroup2"}, []string{"appliedToGroup1", "appliedToGroup2"}, v1beta1.DirectionOut)
+	rule3 := newRule("rule3", v1beta1.K8sNetworkPolicy, "", "", "", []string{"addressGroup1", "addressGroup2", "addressGroup3"}, nil, []string{"appliedToGroup1", "appliedToGroup2"}, v1beta1.DirectionIn)
 	tests := []struct {
 		name              string
 		args              string
@@ -734,14 +749,8 @@ func TestRuleCacheGetCompletedRule(t *testing.T) {
 }
 
 func TestRuleCachePatchAppliedToGroup(t *testing.T) {
-	rule1 := &rule{
-		ID:              "rule1",
-		AppliedToGroups: []string{"group1"},
-	}
-	rule2 := &rule{
-		ID:              "rule2",
-		AppliedToGroups: []string{"group1", "group2"},
-	}
+	rule1 := newRule("rule1", v1beta1.K8sNetworkPolicy, "ns1", "np1", "id1", nil, nil, []string{"group1"}, v1beta1.DirectionIn)
+	rule2 := newRule("rule2", v1beta1.K8sNetworkPolicy, "ns1", "np1", "id1", nil, nil, []string{"group1", "group2"}, v1beta1.DirectionIn)
 	tests := []struct {
 		name               string
 		rules              []*rule
@@ -811,14 +820,8 @@ func TestRuleCachePatchAppliedToGroup(t *testing.T) {
 }
 
 func TestRuleCachePatchAddressGroup(t *testing.T) {
-	rule1 := &rule{
-		ID:   "rule1",
-		From: v1beta1.NetworkPolicyPeer{AddressGroups: []string{"group1"}},
-	}
-	rule2 := &rule{
-		ID: "rule2",
-		To: v1beta1.NetworkPolicyPeer{AddressGroups: []string{"group1", "group2"}},
-	}
+	rule1 := newRule("rule1", v1beta1.K8sNetworkPolicy, "ns1", "np1", "id1", []string{"group1"}, nil, nil, v1beta1.DirectionIn)
+	rule2 := newRule("rule2", v1beta1.K8sNetworkPolicy, "ns1", "np1", "id1", nil, []string{"group1", "group2"}, nil, v1beta1.DirectionIn)
 	tests := []struct {
 		name               string
 		rules              []*rule
@@ -904,16 +907,34 @@ func TestRuleCacheUpdateNetworkPolicy(t *testing.T) {
 		ObjectMeta:      metav1.ObjectMeta{UID: "policy1"},
 		Rules:           []v1beta1.NetworkPolicyRule{*networkPolicyRule1},
 		AppliedToGroups: []string{"addressGroup1"},
+		SourceRef: &v1beta1.NetworkPolicyReference{
+			Type:      v1beta1.K8sNetworkPolicy,
+			Namespace: "ns1",
+			Name:      "name1",
+			UID:       "policy1",
+		},
 	}
 	networkPolicy2 := &v1beta1.NetworkPolicy{
 		ObjectMeta:      metav1.ObjectMeta{UID: "policy1"},
 		Rules:           []v1beta1.NetworkPolicyRule{*networkPolicyRule1},
 		AppliedToGroups: []string{"addressGroup2"},
+		SourceRef: &v1beta1.NetworkPolicyReference{
+			Type:      v1beta1.K8sNetworkPolicy,
+			Namespace: "ns1",
+			Name:      "name1",
+			UID:       "policy1",
+		},
 	}
 	networkPolicy3 := &v1beta1.NetworkPolicy{
 		ObjectMeta:      metav1.ObjectMeta{UID: "policy1"},
 		Rules:           []v1beta1.NetworkPolicyRule{*networkPolicyRule1, *networkPolicyRule2},
 		AppliedToGroups: []string{"addressGroup1"},
+		SourceRef: &v1beta1.NetworkPolicyReference{
+			Type:      v1beta1.K8sNetworkPolicy,
+			Namespace: "ns1",
+			Name:      "name1",
+			UID:       "policy1",
+		},
 	}
 	rule1 := toRule(networkPolicyRule1, networkPolicy1)
 	rule2 := toRule(networkPolicyRule1, networkPolicy2)
@@ -960,14 +981,8 @@ func TestRuleCacheUpdateNetworkPolicy(t *testing.T) {
 }
 
 func TestRuleCacheProcessPodUpdates(t *testing.T) {
-	rule1 := &rule{
-		ID:              "rule1",
-		AppliedToGroups: []string{"group1"},
-	}
-	rule2 := &rule{
-		ID:              "rule2",
-		AppliedToGroups: []string{"group1", "group2"},
-	}
+	rule1 := newRule("rule1", v1beta1.K8sNetworkPolicy, "ns1", "np1", "id1", nil, nil, []string{"group1"}, v1beta1.DirectionIn)
+	rule2 := newRule("rule2", v1beta1.K8sNetworkPolicy, "ns1", "np1", "id1", nil, nil, []string{"group1", "group2"}, v1beta1.DirectionIn)
 	tests := []struct {
 		name               string
 		rules              []*rule

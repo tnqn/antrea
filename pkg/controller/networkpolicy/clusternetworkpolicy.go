@@ -34,35 +34,32 @@ var (
 	}
 )
 
-// addCNP receives ClusterNetworkPolicy ADD events and creates resources
+// addCNP receives Antrea ClusterNetworkPolicy ADD events and creates resources
 // which can be consumed by agents to configure corresponding rules on the Nodes.
 func (n *NetworkPolicyController) addCNP(obj interface{}) {
 	defer n.heartbeat("addCNP")
 	cnp := obj.(*secv1alpha1.ClusterNetworkPolicy)
-	klog.Infof("Processing ClusterNetworkPolicy %s ADD event", cnp.Name)
-	// Create an internal NetworkPolicy object corresponding to this
+	klog.Infof("Processing Antrea ClusterNetworkPolicy %s ADD event", cnp.Name)
+	// Create an internal NetworkPolicy object corresponding to this Antrea
 	// ClusterNetworkPolicy and enqueue task to internal NetworkPolicy Workqueue.
 	internalNP := n.processClusterNetworkPolicy(cnp)
 	klog.Infof("Creating new internal NetworkPolicy %#v", internalNP)
 	n.internalNetworkPolicyStore.Create(internalNP)
-	key, _ := keyFunc(cnp)
-	n.enqueueInternalNetworkPolicy(key)
+	n.enqueueInternalNetworkPolicy(internalNetworkPolicyKeyFunc(cnp))
 }
 
-// updateCNP receives ClusterNetworkPolicy UPDATE events and updates resources
+// updateCNP receives Antrea ClusterNetworkPolicy UPDATE events and updates resources
 // which can be consumed by agents to configure corresponding rules on the Nodes.
 func (n *NetworkPolicyController) updateCNP(old, cur interface{}) {
 	defer n.heartbeat("updateCNP")
 	curCNP := cur.(*secv1alpha1.ClusterNetworkPolicy)
-	klog.Infof("Processing ClusterNetworkPolicy %s UPDATE event", curCNP.Name)
+	klog.Infof("Processing Antrea ClusterNetworkPolicy %s UPDATE event", curCNP.Name)
 	// Update an internal NetworkPolicy, corresponding to this NetworkPolicy and
 	// enqueue task to internal NetworkPolicy Workqueue.
 	curInternalNP := n.processClusterNetworkPolicy(curCNP)
 	klog.V(2).Infof("Updating existing internal NetworkPolicy %s", curInternalNP.Name)
-	// Retrieve old secv1alpha1.NetworkPolicy object.
-	oldCNP := old.(*secv1alpha1.ClusterNetworkPolicy)
 	// Old and current NetworkPolicy share the same key.
-	key, _ := keyFunc(oldCNP)
+	key := internalNetworkPolicyKeyFunc(curCNP)
 	// Lock access to internal NetworkPolicy store such that concurrent access
 	// to an internal NetworkPolicy is not allowed. This will avoid the
 	// case in which an Update to an internal NetworkPolicy object may
@@ -94,25 +91,25 @@ func (n *NetworkPolicyController) updateCNP(old, cur interface{}) {
 	n.deleteDereferencedAddressGroups(oldInternalNP)
 }
 
-// deleteCNP receives ClusterNetworkPolicy DELETED events and deletes resources
+// deleteCNP receives Antrea ClusterNetworkPolicy DELETED events and deletes resources
 // which can be consumed by agents to delete corresponding rules on the Nodes.
 func (n *NetworkPolicyController) deleteCNP(old interface{}) {
 	cnp, ok := old.(*secv1alpha1.ClusterNetworkPolicy)
 	if !ok {
 		tombstone, ok := old.(cache.DeletedFinalStateUnknown)
 		if !ok {
-			klog.Errorf("Error decoding object when deleting ClusterNetworkPolicy, invalid type: %v", old)
+			klog.Errorf("Error decoding object when deleting Antrea ClusterNetworkPolicy, invalid type: %v", old)
 			return
 		}
 		cnp, ok = tombstone.Obj.(*secv1alpha1.ClusterNetworkPolicy)
 		if !ok {
-			klog.Errorf("Error decoding object tombstone when deleting ClusterNetworkPolicy, invalid type: %v", tombstone.Obj)
+			klog.Errorf("Error decoding object tombstone when deleting Antrea ClusterNetworkPolicy, invalid type: %v", tombstone.Obj)
 			return
 		}
 	}
 	defer n.heartbeat("deleteCNP")
-	klog.Infof("Processing ClusterNetworkPolicy %s DELETE event", cnp.Name)
-	key, _ := keyFunc(cnp)
+	klog.Infof("Processing Antrea ClusterNetworkPolicy %s DELETE event", cnp.Name)
+	key := internalNetworkPolicyKeyFunc(cnp)
 	oldInternalNPObj, _, _ := n.internalNetworkPolicyStore.Get(key)
 	oldInternalNP := oldInternalNPObj.(*antreatypes.NetworkPolicy)
 	klog.Infof("Old internal NetworkPolicy %#v", oldInternalNP)
@@ -136,7 +133,7 @@ func (n *NetworkPolicyController) deleteCNP(old interface{}) {
 func (n *NetworkPolicyController) processClusterNetworkPolicy(cnp *secv1alpha1.ClusterNetworkPolicy) *antreatypes.NetworkPolicy {
 	appliedToGroupNames := make([]string, 0, len(cnp.Spec.AppliedTo))
 	// Create AppliedToGroup for each AppliedTo present in
-	// ClusterNetworkPolicy spec.
+	// Antrea ClusterNetworkPolicy spec.
 	for _, at := range cnp.Spec.AppliedTo {
 		appliedToGroupNames = append(appliedToGroupNames, n.createAppliedToGroup("", at.PodSelector, at.NamespaceSelector, at.ExternalEntitySelector))
 	}
@@ -167,8 +164,12 @@ func (n *NetworkPolicyController) processClusterNetworkPolicy(cnp *secv1alpha1.C
 	}
 	tierPriority := getTierPriority(cnp.Spec.Tier)
 	internalNetworkPolicy := &antreatypes.NetworkPolicy{
-		Name:            cnp.Name,
-		Namespace:       "",
+		SourceRef: &controlplane.NetworkPolicyReference{
+			Type: controlplane.AntreaClusterNetworkPolicy,
+			Name: cnp.Name,
+			UID:  cnp.UID,
+		},
+		Name:            internalNetworkPolicyKeyFunc(cnp),
 		UID:             cnp.UID,
 		AppliedToGroups: appliedToGroupNames,
 		Rules:           rules,

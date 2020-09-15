@@ -627,9 +627,14 @@ func (n *NetworkPolicyController) processNetworkPolicy(np *networkingv1.NetworkP
 	}
 
 	internalNetworkPolicy := &antreatypes.NetworkPolicy{
-		Name:            np.ObjectMeta.Name,
-		Namespace:       np.ObjectMeta.Namespace,
-		UID:             np.ObjectMeta.UID,
+		SourceRef: &controlplane.NetworkPolicyReference{
+			Type:      controlplane.K8sNetworkPolicy,
+			Namespace: np.Namespace,
+			Name:      np.Name,
+			UID:       np.UID,
+		},
+		Name:            internalNetworkPolicyKeyFunc(np),
+		UID:             np.UID,
 		AppliedToGroups: appliedToGroupNames,
 		Rules:           rules,
 	}
@@ -684,10 +689,9 @@ func (n *NetworkPolicyController) addNetworkPolicy(obj interface{}) {
 	// Create an internal NetworkPolicy object corresponding to this NetworkPolicy
 	// and enqueue task to internal NetworkPolicy Workqueue.
 	internalNP := n.processNetworkPolicy(np)
-	klog.Infof("Creating new internal NetworkPolicy %s/%s", internalNP.Namespace, internalNP.Name)
+	klog.Infof("Creating new internal NetworkPolicy %s for %s", internalNP.Name, internalNP.SourceRef.ToString())
 	n.internalNetworkPolicyStore.Create(internalNP)
-	key, _ := keyFunc(np)
-	n.enqueueInternalNetworkPolicy(key)
+	n.enqueueInternalNetworkPolicy(internalNetworkPolicyKeyFunc(np))
 }
 
 // updateNetworkPolicy receives NetworkPolicy UPDATE events and updates resources
@@ -699,11 +703,9 @@ func (n *NetworkPolicyController) updateNetworkPolicy(old, cur interface{}) {
 	// Update an internal NetworkPolicy ID, corresponding to this NetworkPolicy and
 	// enqueue task to internal NetworkPolicy Workqueue.
 	curInternalNP := n.processNetworkPolicy(np)
-	klog.V(2).Infof("Updating existing internal NetworkPolicy %s/%s", curInternalNP.Namespace, curInternalNP.Name)
-	// Retrieve old networkingv1.NetworkPolicy object.
-	oldNP := old.(*networkingv1.NetworkPolicy)
+	klog.V(2).Infof("Updating existing internal NetworkPolicy %s for %s", curInternalNP.Name, curInternalNP.SourceRef.ToString())
 	// Old and current NetworkPolicy share the same key.
-	key, _ := keyFunc(oldNP)
+	key := internalNetworkPolicyKeyFunc(np)
 	// Lock access to internal NetworkPolicy store such that concurrent access
 	// to an internal NetworkPolicy is not allowed. This will avoid the
 	// case in which an Update to an internal NetworkPolicy object may
@@ -758,7 +760,7 @@ func (n *NetworkPolicyController) deleteNetworkPolicy(old interface{}) {
 	defer n.heartbeat("deleteNetworkPolicy")
 
 	klog.V(2).Infof("Processing NetworkPolicy %s/%s DELETE event", np.Namespace, np.Name)
-	key, _ := keyFunc(np)
+	key := internalNetworkPolicyKeyFunc(np)
 	oldInternalNPObj, _, _ := n.internalNetworkPolicyStore.Get(key)
 	oldInternalNP := oldInternalNPObj.(*antreatypes.NetworkPolicy)
 	// AppliedToGroups currently only supports a single member.
@@ -1531,9 +1533,9 @@ func (n *NetworkPolicyController) syncInternalNetworkPolicy(key string) error {
 		nodeNames = nodeNames.Union(appGroup.SpanMeta.NodeNames)
 	}
 	updatedNetworkPolicy := &antreatypes.NetworkPolicy{
+		SourceRef:       internalNP.SourceRef,
 		UID:             internalNP.UID,
 		Name:            internalNP.Name,
-		Namespace:       internalNP.Namespace,
 		Rules:           internalNP.Rules,
 		AppliedToGroups: internalNP.AppliedToGroups,
 		Priority:        internalNP.Priority,
@@ -1586,4 +1588,9 @@ func cidrStrToIPNet(cidr string) (*controlplane.IPNet, error) {
 		PrefixLength: int32(prefixLen64),
 	}
 	return ipNet, nil
+}
+
+// internalNetworkPolicyKeyFunc knows how to get the key (name) of an internal NetworkPolicy from the original NetworkPolicy.
+func internalNetworkPolicyKeyFunc(np metav1.Object) string {
+	return string(np.GetUID())
 }

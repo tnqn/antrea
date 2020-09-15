@@ -125,7 +125,13 @@ func newNetworkPolicy(uid string, from, to, appliedTo []string, services []v1bet
 		Services:  services,
 	}
 	return &v1beta1.NetworkPolicy{
-		ObjectMeta:      v1.ObjectMeta{UID: types.UID(uid), Name: uid, Namespace: testNamespace},
+		ObjectMeta: v1.ObjectMeta{UID: types.UID(uid), Name: uid},
+		SourceRef: &v1beta1.NetworkPolicyReference{
+			Type:      v1beta1.K8sNetworkPolicy,
+			Namespace: testNamespace,
+			Name:      uid,
+			UID:       types.UID(uid),
+		},
 		Rules:           []v1beta1.NetworkPolicyRule{networkPolicyRule1},
 		AppliedToGroups: appliedTo,
 	}
@@ -145,9 +151,15 @@ func getNetworkPolicyWithMultipleRules(uid string, from, to, appliedTo []string,
 		Services:  services,
 	}
 	return &v1beta1.NetworkPolicy{
-		ObjectMeta:      v1.ObjectMeta{UID: types.UID(uid), Name: uid, Namespace: testNamespace},
+		ObjectMeta:      v1.ObjectMeta{UID: types.UID(uid), Name: uid},
 		Rules:           []v1beta1.NetworkPolicyRule{networkPolicyRule1, networkPolicyRule2},
 		AppliedToGroups: appliedTo,
+		SourceRef: &v1beta1.NetworkPolicyReference{
+			Type:      v1beta1.K8sNetworkPolicy,
+			Namespace: testNamespace,
+			Name:      uid,
+			UID:       types.UID(uid),
+		},
 	}
 }
 
@@ -182,7 +194,7 @@ func TestAddSingleGroupRule(t *testing.T) {
 		t.Fatalf("Expected no update, got %v", ruleID)
 	case <-time.After(time.Millisecond * 100):
 	}
-	assert.Equal(t, policy1, controller.GetNetworkPolicy(policy1.Name, policy1.Namespace))
+	assert.Equal(t, policy1, controller.GetNetworkPolicy(policy1.Name, testNamespace))
 	assert.Equal(t, 1, controller.GetNetworkPolicyNum())
 	assert.Equal(t, 0, controller.GetAddressGroupNum())
 	assert.Equal(t, 0, controller.GetAppliedToGroupNum())
@@ -265,7 +277,7 @@ func TestAddMultipleGroupsRule(t *testing.T) {
 		t.Fatalf("Expected no update, got %v", ruleID)
 	case <-time.After(time.Millisecond * 100):
 	}
-	assert.Equal(t, policy1, controller.GetNetworkPolicy(policy1.Name, policy1.Namespace))
+	assert.Equal(t, policy1, controller.GetNetworkPolicy(policy1.Name, testNamespace))
 	assert.Equal(t, 1, controller.GetNetworkPolicyNum())
 	assert.Equal(t, 1, controller.GetAddressGroupNum())
 	assert.Equal(t, 1, controller.GetAppliedToGroupNum())
@@ -430,8 +442,8 @@ func TestAddNetworkPolicyWithMultipleRules(t *testing.T) {
 			t.Fatal("Expected two rule updates, got timeout")
 		}
 	}
-	assert.ElementsMatch(t, policy1.Rules, controller.GetNetworkPolicy(policy1.Name, policy1.Namespace).Rules)
-	assert.ElementsMatch(t, policy1.AppliedToGroups, controller.GetNetworkPolicy(policy1.Name, policy1.Namespace).AppliedToGroups)
+	assert.ElementsMatch(t, policy1.Rules, controller.GetNetworkPolicy(policy1.Name, testNamespace).Rules)
+	assert.ElementsMatch(t, policy1.AppliedToGroups, controller.GetNetworkPolicy(policy1.Name, testNamespace).AppliedToGroups)
 	assert.Equal(t, 1, controller.GetNetworkPolicyNum())
 	assert.Equal(t, 2, controller.GetAddressGroupNum())
 	assert.Equal(t, 1, controller.GetAppliedToGroupNum())

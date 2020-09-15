@@ -105,13 +105,12 @@ type AddressGroup struct {
 // NetworkPolicy describes what network traffic is allowed for a set of Pods.
 type NetworkPolicy struct {
 	SpanMeta
-	// UID of the original K8s Network Policy.
+	// Reference to the original Network Policy.
+	SourceRef *controlplane.NetworkPolicyReference
+	// UID of the internal Network Policy.
 	UID types.UID
-	// Name of the original K8s Network Policy.
+	// Name of the internal Network Policy. Currently it's same as UID.
 	Name string
-	// Namespace of the original K8s Network Policy.
-	// An empty value indicates that the Network Policy is Cluster scoped.
-	Namespace string
 	// Priority represents the relative priority of this Network Policy as compared to
 	// other Network Policies. Priority will be unset (nil) for K8s Network Policy.
 	Priority *float64

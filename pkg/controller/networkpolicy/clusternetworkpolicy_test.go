@@ -19,6 +19,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
 
@@ -87,9 +88,13 @@ func TestProcessClusterNetworkPolicy(t *testing.T) {
 				},
 			},
 			expectedPolicy: &antreatypes.NetworkPolicy{
-				UID:          "uidA",
-				Name:         "cnpA",
-				Namespace:    "",
+				UID:  "uidA",
+				Name: "uidA",
+				SourceRef: &controlplane.NetworkPolicyReference{
+					Type: controlplane.AntreaClusterNetworkPolicy,
+					Name: "cnpA",
+					UID:  "uidA",
+				},
 				Priority:     &p10,
 				TierPriority: &appTier,
 				Rules: []controlplane.NetworkPolicyRule{
@@ -167,9 +172,13 @@ func TestProcessClusterNetworkPolicy(t *testing.T) {
 				},
 			},
 			expectedPolicy: &antreatypes.NetworkPolicy{
-				UID:          "uidA",
-				Name:         "cnpA",
-				Namespace:    "",
+				UID:  "uidA",
+				Name: "uidA",
+				SourceRef: &controlplane.NetworkPolicyReference{
+					Type: controlplane.AntreaClusterNetworkPolicy,
+					Name: "cnpA",
+					UID:  "uidA",
+				},
 				Priority:     &p10,
 				TierPriority: &appTier,
 				Rules: []controlplane.NetworkPolicyRule{
@@ -280,9 +289,13 @@ func TestAddCNP(t *testing.T) {
 				},
 			},
 			expPolicy: &antreatypes.NetworkPolicy{
-				UID:          "uidA",
-				Name:         "cnpA",
-				Namespace:    "",
+				UID:  "uidA",
+				Name: "uidA",
+				SourceRef: &controlplane.NetworkPolicyReference{
+					Type: controlplane.AntreaClusterNetworkPolicy,
+					Name: "cnpA",
+					UID:  "uidA",
+				},
 				Priority:     &p10,
 				TierPriority: &appTier,
 				Rules: []controlplane.NetworkPolicyRule{
@@ -335,9 +348,13 @@ func TestAddCNP(t *testing.T) {
 				},
 			},
 			expPolicy: &antreatypes.NetworkPolicy{
-				UID:          "uidB",
-				Name:         "cnpB",
-				Namespace:    "",
+				UID:  "uidB",
+				Name: "uidB",
+				SourceRef: &controlplane.NetworkPolicyReference{
+					Type: controlplane.AntreaClusterNetworkPolicy,
+					Name: "cnpB",
+					UID:  "uidB",
+				},
 				Priority:     &p10,
 				TierPriority: &secOpsTier,
 				Rules: []controlplane.NetworkPolicyRule{
@@ -390,9 +407,13 @@ func TestAddCNP(t *testing.T) {
 				},
 			},
 			expPolicy: &antreatypes.NetworkPolicy{
-				UID:          "uidC",
-				Name:         "cnpC",
-				Namespace:    "",
+				UID:  "uidC",
+				Name: "uidC",
+				SourceRef: &controlplane.NetworkPolicyReference{
+					Type: controlplane.AntreaClusterNetworkPolicy,
+					Name: "cnpC",
+					UID:  "uidC",
+				},
 				Priority:     &p10,
 				TierPriority: &netOpsTier,
 				Rules: []controlplane.NetworkPolicyRule{
@@ -445,9 +466,13 @@ func TestAddCNP(t *testing.T) {
 				},
 			},
 			expPolicy: &antreatypes.NetworkPolicy{
-				UID:          "uidD",
-				Name:         "cnpD",
-				Namespace:    "",
+				UID:  "uidD",
+				Name: "uidD",
+				SourceRef: &controlplane.NetworkPolicyReference{
+					Type: controlplane.AntreaClusterNetworkPolicy,
+					Name: "cnpD",
+					UID:  "uidD",
+				},
 				Priority:     &p10,
 				TierPriority: &emergencyTier,
 				Rules: []controlplane.NetworkPolicyRule{
@@ -500,9 +525,13 @@ func TestAddCNP(t *testing.T) {
 				},
 			},
 			expPolicy: &antreatypes.NetworkPolicy{
-				UID:          "uidE",
-				Name:         "cnpE",
-				Namespace:    "",
+				UID:  "uidE",
+				Name: "uidE",
+				SourceRef: &controlplane.NetworkPolicyReference{
+					Type: controlplane.AntreaClusterNetworkPolicy,
+					Name: "cnpE",
+					UID:  "uidE",
+				},
 				Priority:     &p10,
 				TierPriority: &platformTier,
 				Rules: []controlplane.NetworkPolicyRule{
@@ -570,9 +599,13 @@ func TestAddCNP(t *testing.T) {
 				},
 			},
 			expPolicy: &antreatypes.NetworkPolicy{
-				UID:          "uidF",
-				Name:         "cnpF",
-				Namespace:    "",
+				UID:  "uidF",
+				Name: "uidF",
+				SourceRef: &controlplane.NetworkPolicyReference{
+					Type: controlplane.AntreaClusterNetworkPolicy,
+					Name: "cnpF",
+					UID:  "uidF",
+				},
 				Priority:     &p10,
 				TierPriority: &appTier,
 				Rules: []controlplane.NetworkPolicyRule{
@@ -650,9 +683,13 @@ func TestAddCNP(t *testing.T) {
 				},
 			},
 			expPolicy: &antreatypes.NetworkPolicy{
-				UID:          "uidG",
-				Name:         "cnpG",
-				Namespace:    "",
+				UID:  "uidG",
+				Name: "uidG",
+				SourceRef: &controlplane.NetworkPolicyReference{
+					Type: controlplane.AntreaClusterNetworkPolicy,
+					Name: "cnpG",
+					UID:  "uidG",
+				},
 				Priority:     &p10,
 				TierPriority: &appTier,
 				Rules: []controlplane.NetworkPolicyRule{
@@ -695,8 +732,8 @@ func TestAddCNP(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			_, npc := newController()
 			npc.addCNP(tt.inputPolicy)
-			key, _ := keyFunc(tt.inputPolicy)
-			actualPolicyObj, _, _ := npc.internalNetworkPolicyStore.Get(key)
+			actualPolicyObj, exists, _ := npc.internalNetworkPolicyStore.Get(internalNetworkPolicyKeyFunc(tt.inputPolicy))
+			require.True(t, exists)
 			actualPolicy := actualPolicyObj.(*antreatypes.NetworkPolicy)
 			if !reflect.DeepEqual(actualPolicy, tt.expPolicy) {
 				t.Errorf("addCNP() got %v, want %v", actualPolicy, tt.expPolicy)
