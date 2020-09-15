@@ -34,8 +34,8 @@ func (c *FakeControlplaneV1beta1) AppliedToGroups() v1beta1.AppliedToGroupInterf
 	return &FakeAppliedToGroups{c}
 }
 
-func (c *FakeControlplaneV1beta1) NetworkPolicies(namespace string) v1beta1.NetworkPolicyInterface {
-	return &FakeNetworkPolicies{c, namespace}
+func (c *FakeControlplaneV1beta1) NetworkPolicies() v1beta1.NetworkPolicyInterface {
+	return &FakeNetworkPolicies{c}
 }
 
 // RESTClient returns a RESTClient that is used to communicate

@@ -42,8 +42,8 @@ func (c *ControlplaneV1beta1Client) AppliedToGroups() AppliedToGroupInterface {
 	return newAppliedToGroups(c)
 }
 
-func (c *ControlplaneV1beta1Client) NetworkPolicies(namespace string) NetworkPolicyInterface {
-	return newNetworkPolicies(c, namespace)
+func (c *ControlplaneV1beta1Client) NetworkPolicies() NetworkPolicyInterface {
+	return newNetworkPolicies(c)
 }
 
 // NewForConfig creates a new ControlplaneV1beta1Client for the given config.

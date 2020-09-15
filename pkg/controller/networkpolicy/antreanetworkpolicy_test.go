@@ -91,9 +91,15 @@ func TestProcessAntreaNetworkPolicy(t *testing.T) {
 				},
 			},
 			expectedPolicy: &antreatypes.NetworkPolicy{
-				UID:          "uidA",
-				Name:         "npA",
-				Namespace:    "ns1",
+				UID:       "uidA",
+				Name:      "npA",
+				Namespace: "ns1",
+				SourceRef: &controlplane.NetworkPolicyReference{
+					Type:      controlplane.AntreaNetworkPolicy,
+					Namespace: "ns1",
+					Name:      "npA",
+					UID:       "uidA",
+				},
 				Priority:     &p10,
 				TierPriority: &appTier,
 				Rules: []controlplane.NetworkPolicyRule{
@@ -171,9 +177,15 @@ func TestProcessAntreaNetworkPolicy(t *testing.T) {
 				},
 			},
 			expectedPolicy: &antreatypes.NetworkPolicy{
-				UID:          "uidB",
-				Name:         "npB",
-				Namespace:    "ns2",
+				UID:       "uidB",
+				Name:      "nsB",
+				Namespace: "ns2",
+				SourceRef: &controlplane.NetworkPolicyReference{
+					Type:      controlplane.AntreaNetworkPolicy,
+					Namespace: "ns2",
+					Name:      "npB",
+					UID:       "uidB",
+				},
 				Priority:     &p10,
 				TierPriority: &appTier,
 				Rules: []controlplane.NetworkPolicyRule{
@@ -278,9 +290,15 @@ func TestAddANP(t *testing.T) {
 				},
 			},
 			expPolicy: &antreatypes.NetworkPolicy{
-				UID:          "uidA",
-				Name:         "anpA",
-				Namespace:    "nsA",
+				UID:       "uidA",
+				Name:      "anpA",
+				Namespace: "nsA",
+				SourceRef: &controlplane.NetworkPolicyReference{
+					Type:      controlplane.AntreaNetworkPolicy,
+					Namespace: "nsA",
+					Name:      "anpA",
+					UID:       "uidA",
+				},
 				Priority:     &p10,
 				TierPriority: &appTier,
 				Rules: []controlplane.NetworkPolicyRule{
