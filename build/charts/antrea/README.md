@@ -73,6 +73,7 @@ Kubernetes: `>= 1.16.0-0`
 | egress.exceptCIDRs | list | `[]` | CIDR ranges to which outbound Pod traffic will not be SNAT'd by Egresses. |
 | egress.maxEgressIPsPerNode | int | `255` | The maximum number of Egress IPs that can be assigned to a Node. It's useful when the Node network restricts the number of secondary IPs a Node can have, e.g. EKS. It must not be greater than 255. |
 | enableBridgingMode | bool | `false` | Enable bridging mode of Pod network on Nodes, in which the Node's transport interface is connected to the OVS bridge. |
+| enableResourceInit | bool | `false` | Move all mutable resources in antrea.yml to antrea-resource-init-config ConfigMap. |
 | featureGates | object | `{}` | To explicitly enable or disable a FeatureGate and bypass the Antrea defaults, add an entry to the dictionary with the FeatureGate's name as the key and a boolean as the value. |
 | flowCollector.activeFlowExportTimeout | string | `"5s"` | timeout after which a flow record is sent to the collector for active flows. |
 | flowCollector.collectorAddr | string | `"flow-aggregator/flow-aggregator:4739:tls"` | IPFIX collector address as a string with format <HOST>:[<PORT>][:<PROTO>]. If the collector is running in-cluster as a Service, set <HOST> to <Service namespace>/<Service name>. |
