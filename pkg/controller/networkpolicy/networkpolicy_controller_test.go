@@ -98,9 +98,12 @@ func newController(objects ...runtime.Object) (*fake.Clientset, *networkPolicyCo
 		crdInformerFactory.Security().V1alpha1().ClusterNetworkPolicies(),
 		crdInformerFactory.Security().V1alpha1().NetworkPolicies(),
 		crdInformerFactory.Security().V1alpha1().Tiers(),
+		crdInformerFactory.Crd().V1alpha1().TierEntitlements(),
+		crdInformerFactory.Crd().V1alpha1().TierEntitlementBindings(),
 		addressGroupStore,
 		appliedToGroupStore,
-		internalNetworkPolicyStore)
+		internalNetworkPolicyStore,
+		true)
 	npController.podListerSynced = alwaysReady
 	npController.namespaceListerSynced = alwaysReady
 	npController.networkPolicyListerSynced = alwaysReady

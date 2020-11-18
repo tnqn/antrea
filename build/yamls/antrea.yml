@@ -476,6 +476,93 @@ kind: CustomResourceDefinition
 metadata:
   labels:
     app: antrea
+  name: tierentitlementbindings.crd.antrea.tanzu.vmware.com
+spec:
+  group: crd.antrea.tanzu.vmware.com
+  names:
+    kind: TierEntitlementBinding
+    plural: tierentitlementbindings
+    shortNames:
+    - teb
+    singular: tierentitlementbinding
+  scope: Cluster
+  versions:
+  - name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        properties:
+          spec:
+            properties:
+              subjects:
+                items:
+                  properties:
+                    apiGroup:
+                      enum:
+                      - rbac.authorization.k8s.io
+                      type: string
+                    kind:
+                      enum:
+                      - User
+                      - Group
+                      type: string
+                    name:
+                      type: string
+                  type: object
+                type: array
+              tierEntitlement:
+                type: string
+            required:
+            - tierEntitlement
+            - subjects
+            type: object
+        type: object
+    served: true
+    storage: true
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  labels:
+    app: antrea
+  name: tierentitlements.crd.antrea.tanzu.vmware.com
+spec:
+  group: crd.antrea.tanzu.vmware.com
+  names:
+    kind: TierEntitlement
+    plural: tierentitlements
+    shortNames:
+    - te
+    singular: tierentitlement
+  scope: Cluster
+  versions:
+  - name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        properties:
+          spec:
+            properties:
+              permission:
+                enum:
+                - edit
+                - read
+                type: string
+              tiers:
+                items:
+                  type: string
+                type: array
+            required:
+            - permission
+            - tiers
+            type: object
+        type: object
+    served: true
+    storage: true
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  labels:
+    app: antrea
   name: tiers.security.antrea.tanzu.vmware.com
 spec:
   group: security.antrea.tanzu.vmware.com
@@ -1076,6 +1163,15 @@ rules:
   - list
   - create
   - update
+- apiGroups:
+  - crd.antrea.tanzu.vmware.com
+  resources:
+  - tierentitlements
+  - tierentitlementbindings
+  verbs:
+  - get
+  - watch
+  - list
 - apiGroups:
   - ops.antrea.tanzu.vmware.com
   resources:
@@ -1831,6 +1927,7 @@ webhooks:
     operations:
     - CREATE
     - UPDATE
+    - DELETE
     resources:
     - clusternetworkpolicies
     scope: Cluster
@@ -1853,6 +1950,7 @@ webhooks:
     operations:
     - CREATE
     - UPDATE
+    - DELETE
     resources:
     - networkpolicies
     scope: Namespaced

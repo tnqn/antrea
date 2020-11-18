@@ -113,6 +113,11 @@ func NewNetworkPolicyValidator(networkPolicyController *NetworkPolicyController)
 	}
 	vr.RegisterAntreaPolicyValidator(&apv)
 	vr.RegisterTierValidator(&tv)
+	// Initialize additional validators for enterprise Antrea features.
+	if networkPolicyController.enableEnterpriseFeatures() {
+		eav := enterpriseAntreaPolicyValidator{networkPolicyController: networkPolicyController}
+		vr.RegisterAntreaPolicyValidator(&eav)
+	}
 	return &vr
 }
 
@@ -206,8 +211,6 @@ func (v *NetworkPolicyValidator) validateAntreaPolicy(curObj, oldObj interface{}
 			}
 		}
 	case admv1.Delete:
-		// Delete of Antrea Policies have no validation. This will be an
-		// empty for loop.
 		for _, val := range v.antreaPolicyValidators {
 			reason, allowed = val.deleteValidate(oldObj, userInfo)
 			if !allowed {
@@ -248,7 +251,7 @@ func (a *antreaPolicyValidator) validatePort(ingress, egress []secv1alpha1.Rule)
 	return nil
 }
 
-// validateTier validates the admission of a Tier resource
+// validateTier validates the admission of a Tier resource.
 func (v *NetworkPolicyValidator) validateTier(curTier, oldTier *secv1alpha1.Tier, op admv1.Operation, userInfo authenticationv1.UserInfo) (string, bool) {
 	allowed := true
 	reason := ""
@@ -262,7 +265,7 @@ func (v *NetworkPolicyValidator) validateTier(curTier, oldTier *secv1alpha1.Tier
 			}
 		}
 	case admv1.Update:
-		// Tier priority updates are not allowed
+		// Tier priority updates are not allowed.
 		klog.V(2).Info("Validating UPDATE request for Tier")
 		for _, val := range v.tierValidators {
 			reason, allowed = val.updateValidate(curTier, oldTier, userInfo)

@@ -97,6 +97,8 @@ func run(o *Options) error {
 	externalEntityInformer := crdInformerFactory.Core().V1alpha2().ExternalEntities()
 	anpInformer := crdInformerFactory.Security().V1alpha1().NetworkPolicies()
 	tierInformer := crdInformerFactory.Security().V1alpha1().Tiers()
+	tierEntitlementInformer := crdInformerFactory.Crd().V1alpha1().TierEntitlements()
+	tierEntitlementBindingInformer := crdInformerFactory.Crd().V1alpha1().TierEntitlementBindings()
 	traceflowInformer := crdInformerFactory.Ops().V1alpha1().Traceflows()
 
 	// Create Antrea object storage.
@@ -113,9 +115,12 @@ func run(o *Options) error {
 		cnpInformer,
 		anpInformer,
 		tierInformer,
+		tierEntitlementInformer,
+		tierEntitlementBindingInformer,
 		addressGroupStore,
 		appliedToGroupStore,
-		networkPolicyStore)
+		networkPolicyStore,
+		o.config.EnterpriseAntrea)
 
 	var networkPolicyStatusController *networkpolicy.StatusController
 	if features.DefaultFeatureGate.Enabled(features.AntreaPolicy) {

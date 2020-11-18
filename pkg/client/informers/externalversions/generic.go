@@ -21,7 +21,8 @@ import (
 
 	v1beta1 "github.com/vmware-tanzu/antrea/pkg/apis/clusterinformation/v1beta1"
 	v1alpha2 "github.com/vmware-tanzu/antrea/pkg/apis/core/v1alpha2"
-	v1alpha1 "github.com/vmware-tanzu/antrea/pkg/apis/ops/v1alpha1"
+	v1alpha1 "github.com/vmware-tanzu/antrea/pkg/apis/crd/v1alpha1"
+	opsv1alpha1 "github.com/vmware-tanzu/antrea/pkg/apis/ops/v1alpha1"
 	securityv1alpha1 "github.com/vmware-tanzu/antrea/pkg/apis/security/v1alpha1"
 	schema "k8s.io/apimachinery/pkg/runtime/schema"
 	cache "k8s.io/client-go/tools/cache"
@@ -63,8 +64,14 @@ func (f *sharedInformerFactory) ForResource(resource schema.GroupVersionResource
 	case v1alpha2.SchemeGroupVersion.WithResource("externalentities"):
 		return &genericInformer{resource: resource.GroupResource(), informer: f.Core().V1alpha2().ExternalEntities().Informer()}, nil
 
+		// Group=crd.antrea.tanzu.vmware.com, Version=v1alpha1
+	case v1alpha1.SchemeGroupVersion.WithResource("tierentitlements"):
+		return &genericInformer{resource: resource.GroupResource(), informer: f.Crd().V1alpha1().TierEntitlements().Informer()}, nil
+	case v1alpha1.SchemeGroupVersion.WithResource("tierentitlementbindings"):
+		return &genericInformer{resource: resource.GroupResource(), informer: f.Crd().V1alpha1().TierEntitlementBindings().Informer()}, nil
+
 		// Group=ops.antrea.tanzu.vmware.com, Version=v1alpha1
-	case v1alpha1.SchemeGroupVersion.WithResource("traceflows"):
+	case opsv1alpha1.SchemeGroupVersion.WithResource("traceflows"):
 		return &genericInformer{resource: resource.GroupResource(), informer: f.Ops().V1alpha1().Traceflows().Informer()}, nil
 
 		// Group=security.antrea.tanzu.vmware.com, Version=v1alpha1

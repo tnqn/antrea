@@ -24,6 +24,7 @@ import (
 	versioned "github.com/vmware-tanzu/antrea/pkg/client/clientset/versioned"
 	clusterinformation "github.com/vmware-tanzu/antrea/pkg/client/informers/externalversions/clusterinformation"
 	core "github.com/vmware-tanzu/antrea/pkg/client/informers/externalversions/core"
+	crd "github.com/vmware-tanzu/antrea/pkg/client/informers/externalversions/crd"
 	internalinterfaces "github.com/vmware-tanzu/antrea/pkg/client/informers/externalversions/internalinterfaces"
 	ops "github.com/vmware-tanzu/antrea/pkg/client/informers/externalversions/ops"
 	security "github.com/vmware-tanzu/antrea/pkg/client/informers/externalversions/security"
@@ -175,6 +176,7 @@ type SharedInformerFactory interface {
 
 	Clusterinformation() clusterinformation.Interface
 	Core() core.Interface
+	Crd() crd.Interface
 	Ops() ops.Interface
 	Security() security.Interface
 }
@@ -185,6 +187,10 @@ func (f *sharedInformerFactory) Clusterinformation() clusterinformation.Interfac
 
 func (f *sharedInformerFactory) Core() core.Interface {
 	return core.New(f, f.namespace, f.tweakListOptions)
+}
+
+func (f *sharedInformerFactory) Crd() crd.Interface {
+	return crd.New(f, f.namespace, f.tweakListOptions)
 }
 
 func (f *sharedInformerFactory) Ops() ops.Interface {

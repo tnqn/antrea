@@ -29,6 +29,7 @@ protoc --go_out=plugins=grpc:. pkg/apis/cni/v1beta1/cni.proto
 $GOPATH/bin/client-gen \
   --clientset-name versioned \
   --input-base "${ANTREA_PKG}/pkg/apis/" \
+  --input "crd/v1alpha1" \
   --input "clusterinformation/v1beta1" \
   --input "controlplane/v1beta1" \
   --input "controlplane/v1beta2" \
@@ -46,6 +47,7 @@ $GOPATH/bin/client-gen \
 # Generate listers with K8s codegen tools.
 $GOPATH/bin/lister-gen \
   --input-dirs "${ANTREA_PKG}/pkg/apis/security/v1alpha1,${ANTREA_PKG}/pkg/apis/core/v1alpha2" \
+  --input-dirs "${ANTREA_PKG}/pkg/apis/crd/v1alpha1" \
   --input-dirs "${ANTREA_PKG}/pkg/apis/ops/v1alpha1" \
   --input-dirs "${ANTREA_PKG}/pkg/apis/clusterinformation/v1beta1" \
   --output-package "${ANTREA_PKG}/pkg/client/listers" \
@@ -54,6 +56,7 @@ $GOPATH/bin/lister-gen \
 # Generate informers with K8s codegen tools.
 $GOPATH/bin/informer-gen \
   --input-dirs "${ANTREA_PKG}/pkg/apis/security/v1alpha1,${ANTREA_PKG}/pkg/apis/core/v1alpha2" \
+  --input-dirs "${ANTREA_PKG}/pkg/apis/crd/v1alpha1" \
   --input-dirs "${ANTREA_PKG}/pkg/apis/ops/v1alpha1" \
   --input-dirs "${ANTREA_PKG}/pkg/apis/clusterinformation/v1beta1" \
   --versioned-clientset-package "${ANTREA_PKG}/pkg/client/clientset/versioned" \
@@ -62,6 +65,7 @@ $GOPATH/bin/informer-gen \
   --go-header-file hack/boilerplate/license_header.go.txt
 
 $GOPATH/bin/deepcopy-gen \
+  --input-dirs "${ANTREA_PKG}/pkg/apis/crd/v1alpha1" \
   --input-dirs "${ANTREA_PKG}/pkg/apis/clusterinformation/v1beta1" \
   --input-dirs "${ANTREA_PKG}/pkg/apis/controlplane" \
   --input-dirs "${ANTREA_PKG}/pkg/apis/controlplane/v1beta1" \

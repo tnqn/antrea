@@ -132,7 +132,7 @@ webhooks:
       namespace: "kube-system"
       path: "/validate/acnp"
   rules:
-  - operations: ["CREATE", "UPDATE"]
+  - operations: ["CREATE", "UPDATE", "DELETE"]
     apiGroups: ["security.antrea.tanzu.vmware.com"]
     apiVersions: ["v1alpha1"]
     resources: ["clusternetworkpolicies"]
@@ -147,7 +147,7 @@ webhooks:
       namespace: "kube-system"
       path: "/validate/anp"
   rules:
-  - operations: ["CREATE", "UPDATE"]
+  - operations: ["CREATE", "UPDATE", "DELETE"]
     apiGroups: ["security.antrea.tanzu.vmware.com"]
     apiVersions: ["v1alpha1"]
     resources: ["networkpolicies"]

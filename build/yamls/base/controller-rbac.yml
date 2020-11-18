@@ -132,6 +132,15 @@ rules:
       - create
       - update
   - apiGroups:
+      - crd.antrea.tanzu.vmware.com
+    resources:
+      - tierentitlements
+      - tierentitlementbindings
+    verbs:
+      - get
+      - watch
+      - list
+  - apiGroups:
       - ops.antrea.tanzu.vmware.com
     resources:
       - traceflows

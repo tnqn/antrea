@@ -31,12 +31,14 @@ import (
 	"gopkg.in/yaml.v2"
 	corev1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
+	rbacv1 "k8s.io/api/rbac/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/apimachinery/pkg/util/wait"
+	"k8s.io/apiserver/pkg/authentication/serviceaccount"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/scheme"
 	restclient "k8s.io/client-go/rest"
@@ -47,6 +49,7 @@ import (
 
 	"github.com/vmware-tanzu/antrea/pkg/agent/config"
 	crdclientset "github.com/vmware-tanzu/antrea/pkg/client/clientset/versioned"
+	crdv1a1 "github.com/vmware-tanzu/antrea/pkg/client/clientset/versioned/typed/crd/v1alpha1"
 	secv1alpha1 "github.com/vmware-tanzu/antrea/pkg/client/clientset/versioned/typed/security/v1alpha1"
 	"github.com/vmware-tanzu/antrea/pkg/features"
 	"github.com/vmware-tanzu/antrea/test/e2e/providers"
@@ -131,9 +134,12 @@ var provider providers.ProviderInterface
 type TestData struct {
 	kubeConfig         *restclient.Config
 	clientset          kubernetes.Interface
+	nonAdminClientset  kubernetes.Interface
 	aggregatorClient   aggregatorclientset.Interface
 	securityClient     secv1alpha1.SecurityV1alpha1Interface
+	nonAdminSecClient  secv1alpha1.SecurityV1alpha1Interface
 	crdClient          crdclientset.Interface
+	crdv1a1Client      crdv1a1.CrdV1alpha1Interface
 	logsDirForTestCase string
 }
 
@@ -628,6 +634,10 @@ func (data *TestData) createClient() error {
 	if err != nil {
 		return fmt.Errorf("error when creating Antrea securityClient: %v", err)
 	}
+	crdv1a1Client, err := crdv1a1.NewForConfig(kubeConfig)
+	if err != nil {
+		return fmt.Errorf("error when creating Antrea crdv1a1Client: %v", err)
+	}
 	crdClient, err := crdclientset.NewForConfig(kubeConfig)
 	if err != nil {
 		return fmt.Errorf("error when creating CRD client: %v", err)
@@ -636,8 +646,54 @@ func (data *TestData) createClient() error {
 	data.clientset = clientset
 	data.aggregatorClient = aggregatorClient
 	data.securityClient = securityClient
+	data.crdv1a1Client = crdv1a1Client
 	data.crdClient = crdClient
 	return nil
+}
+
+func (data *TestData) setNonAdminClient() error {
+	kubeconfigPath, err := provider.GetKubeconfigPath()
+	if err != nil {
+		return fmt.Errorf("error when getting Kubeconfig path for non admin user: %v", err)
+	}
+
+	loadingRules := clientcmd.NewDefaultClientConfigLoadingRules()
+	loadingRules.ExplicitPath = kubeconfigPath
+	configOverrides := &clientcmd.ConfigOverrides{}
+
+	kubeConfig, err := clientcmd.NewNonInteractiveDeferredLoadingClientConfig(loadingRules, configOverrides).ClientConfig()
+	if err != nil {
+		return fmt.Errorf("error when creating config for non admin user: %v", err)
+	}
+	kubeConfig.Impersonate = restclient.ImpersonationConfig{
+		UserName: serviceaccount.MakeUsername(testNamespace, "default"),
+		Groups:   serviceaccount.MakeGroupNames(testNamespace),
+	}
+	nonAdminClientset, err := kubernetes.NewForConfig(kubeConfig)
+	if err != nil {
+		return fmt.Errorf("error when creating non admin clientset: %v", err)
+	}
+	// Bind this user to edit cluster role
+	_ = bindClusterRole(data.clientset, "edit", testNamespace,
+		rbacv1.Subject{Kind: rbacv1.ServiceAccountKind, Namespace: testNamespace, Name: "default"})
+	securityClient, err := secv1alpha1.NewForConfig(kubeConfig)
+	if err != nil {
+		return fmt.Errorf("error when creating Antrea securityClient for non admin user: %v", err)
+	}
+	data.nonAdminClientset = nonAdminClientset
+	data.nonAdminSecClient = securityClient
+	return nil
+}
+
+// getServiceAccountAsUserSubject constructs a User Subject for the serviceaccount
+// name and Namespace.
+func getServiceAccountAsUserSubject(ns, name string) rbacv1.Subject {
+	return rbacv1.Subject{
+		Kind:      rbacv1.UserKind,
+		APIGroup:  "rbac.authorization.k8s.io",
+		Namespace: ns,
+		Name:      serviceaccount.MakeUsername(ns, name),
+	}
 }
 
 // deleteAntrea deletes the Antrea DaemonSet; we use cascading deletion, which means all the Pods created
@@ -1353,6 +1409,24 @@ func (data *TestData) GetEncapMode() (config.TrafficEncapModeType, error) {
 	return config.TrafficEncapModeInvalid, fmt.Errorf("antrea-conf config map is not found")
 }
 
+// enterpriseAntreaEnabled returns whether EnterpriseAntrea option is enabled in controller
+// conf.
+func (data *TestData) enterpriseAntreaEnabled() (bool, error) {
+	cfgMap, err := data.GetAntreaConfigMap(antreaNamespace)
+	if err != nil {
+		return false, err
+	}
+	var cfg interface{}
+	if err := yaml.Unmarshal([]byte(cfgMap.Data[antreaControllerConfName]), &cfg); err != nil {
+		return false, err
+	}
+	enterpriseAntreaOpt, ok := cfg.(map[interface{}]interface{})["enterpriseAntrea"]
+	if !ok || !enterpriseAntreaOpt.(bool) {
+		return false, nil
+	}
+	return true, nil
+}
+
 func (data *TestData) getFeatures(confName string, antreaNamespace string) (featuregate.FeatureGate, error) {
 	featureGate := features.DefaultMutableFeatureGate.DeepCopy()
 	cfgMap, err := data.GetAntreaConfigMap(antreaNamespace)
@@ -1638,5 +1712,27 @@ func (data *TestData) copyNodeFiles(nodeName string, fileName string, covDir str
 		return nil
 	}
 	w.WriteString(stdout)
+	return nil
+}
+
+// bindClusterRole binds the cluster role at the cluster scope. If RBAC is not enabled, nil
+// is returned with no action.
+func bindClusterRole(c kubernetes.Interface, clusterRole, ns string, subjects ...rbacv1.Subject) error {
+	_, err := c.RbacV1().ClusterRoleBindings().Create(context.TODO(), &rbacv1.ClusterRoleBinding{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: ns + "--" + clusterRole,
+		},
+		RoleRef: rbacv1.RoleRef{
+			APIGroup: "rbac.authorization.k8s.io",
+			Kind:     "ClusterRole",
+			Name:     clusterRole,
+		},
+		Subjects: subjects,
+	}, metav1.CreateOptions{})
+
+	if err != nil {
+		return fmt.Errorf("binding clusterrole/%s for %q for %v failed with error: %v", clusterRole, ns, subjects, err)
+	}
+
 	return nil
 }

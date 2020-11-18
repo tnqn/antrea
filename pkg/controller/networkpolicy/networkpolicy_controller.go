@@ -47,12 +47,15 @@ import (
 
 	"github.com/vmware-tanzu/antrea/pkg/apis/controlplane"
 	"github.com/vmware-tanzu/antrea/pkg/apis/core/v1alpha2"
+	crdv1alpha1 "github.com/vmware-tanzu/antrea/pkg/apis/crd/v1alpha1"
 	secv1alpha1 "github.com/vmware-tanzu/antrea/pkg/apis/security/v1alpha1"
 	"github.com/vmware-tanzu/antrea/pkg/apiserver/storage"
 	"github.com/vmware-tanzu/antrea/pkg/client/clientset/versioned"
 	corev1a2informers "github.com/vmware-tanzu/antrea/pkg/client/informers/externalversions/core/v1alpha2"
+	crdv1a1informers "github.com/vmware-tanzu/antrea/pkg/client/informers/externalversions/crd/v1alpha1"
 	secinformers "github.com/vmware-tanzu/antrea/pkg/client/informers/externalversions/security/v1alpha1"
 	corev1a2listers "github.com/vmware-tanzu/antrea/pkg/client/listers/core/v1alpha2"
+	crdv1a1listers "github.com/vmware-tanzu/antrea/pkg/client/listers/crd/v1alpha1"
 	seclisters "github.com/vmware-tanzu/antrea/pkg/client/listers/security/v1alpha1"
 	"github.com/vmware-tanzu/antrea/pkg/controller/metrics"
 	"github.com/vmware-tanzu/antrea/pkg/controller/networkpolicy/store"
@@ -75,6 +78,9 @@ const (
 	defaultRulePriority = -1
 	// TierIndex is used to index ClusterNetworkPolicies by Tier names.
 	TierIndex = "tier"
+	// TierEntitlementIndex is used to index TierEntitlementBindings by
+	// TierEntitlement names.
+	TierEntitlementIndex = "tierEntitlement"
 	// PriorityIndex is used to index Tiers by their priorities.
 	PriorityIndex = "priority"
 )
@@ -165,6 +171,20 @@ type NetworkPolicyController struct {
 	// tierListerSynced is a function which returns true if the Tiers shared informer has been synced at least once.
 	tierListerSynced cache.InformerSynced
 
+	tierEntitlementInformer crdv1a1informers.TierEntitlementInformer
+	// tierEntitlementLister is able to list/get TierEntitlements and is populated by the shared informer passed to
+	// NewNetworkPolicyController.
+	tierEntitlementLister crdv1a1listers.TierEntitlementLister
+	// tierEntitlementListerSynced is a function which returns true if the TierEntitlements shared informer has been synced at least once.
+	tierEntitlementListerSynced cache.InformerSynced
+
+	tierEntitlementBindingInformer crdv1a1informers.TierEntitlementBindingInformer
+	// tierEntitlementBindingLister is able to list/get TierEntitlementBindings and is populated by the shared informer passed to
+	// NewNetworkPolicyController.
+	tierEntitlementBindingLister crdv1a1listers.TierEntitlementBindingLister
+	// tierEntitlementBindingListerSynced is a function which returns true if the TierEntitlementBindings shared informer has been synced at least once.
+	tierEntitlementBindingListerSynced cache.InformerSynced
+
 	// addressGroupStore is the storage where the populated Address Groups are stored.
 	addressGroupStore storage.Interface
 	// appliedToGroupStore is the storage where the populated AppliedTo Groups are stored.
@@ -189,6 +209,10 @@ type NetworkPolicyController struct {
 	// heartbeatCh is an internal channel for testing. It's used to know whether all tasks have been
 	// processed, and to count executions of each function.
 	heartbeatCh chan heartbeat
+
+	// isEnterpriseAntrea notifies the controller to activate advanced
+	// NetworkPolicy features.
+	isEnterpriseAntrea bool
 }
 
 type heartbeat struct {
@@ -206,9 +230,12 @@ func NewNetworkPolicyController(kubeClient clientset.Interface,
 	cnpInformer secinformers.ClusterNetworkPolicyInformer,
 	anpInformer secinformers.NetworkPolicyInformer,
 	tierInformer secinformers.TierInformer,
+	tierEntitlementInformer crdv1a1informers.TierEntitlementInformer,
+	tierEntitlementBindingInformer crdv1a1informers.TierEntitlementBindingInformer,
 	addressGroupStore storage.Interface,
 	appliedToGroupStore storage.Interface,
-	internalNetworkPolicyStore storage.Interface) *NetworkPolicyController {
+	internalNetworkPolicyStore storage.Interface,
+	isEnterpriseAntrea bool) *NetworkPolicyController {
 	n := &NetworkPolicyController{
 		kubeClient:                 kubeClient,
 		crdClient:                  crdClient,
@@ -230,6 +257,7 @@ func NewNetworkPolicyController(kubeClient clientset.Interface,
 		appliedToGroupQueue:        workqueue.NewNamedRateLimitingQueue(workqueue.NewItemExponentialFailureRateLimiter(minRetryDelay, maxRetryDelay), "appliedToGroup"),
 		addressGroupQueue:          workqueue.NewNamedRateLimitingQueue(workqueue.NewItemExponentialFailureRateLimiter(minRetryDelay, maxRetryDelay), "addressGroup"),
 		internalNetworkPolicyQueue: workqueue.NewNamedRateLimitingQueue(workqueue.NewItemExponentialFailureRateLimiter(minRetryDelay, maxRetryDelay), "internalNetworkPolicy"),
+		isEnterpriseAntrea:         isEnterpriseAntrea,
 	}
 	// Add handlers for Pod events.
 	podInformer.Informer().AddEventHandlerWithResyncPeriod(
@@ -269,6 +297,13 @@ func NewNetworkPolicyController(kubeClient clientset.Interface,
 		n.tierInformer = tierInformer
 		n.tierLister = tierInformer.Lister()
 		n.tierListerSynced = tierInformer.Informer().HasSynced
+		// TODO: add below informers only when using enterprise Antrea
+		n.tierEntitlementInformer = tierEntitlementInformer
+		n.tierEntitlementLister = tierEntitlementInformer.Lister()
+		n.tierEntitlementListerSynced = tierEntitlementInformer.Informer().HasSynced
+		n.tierEntitlementBindingInformer = tierEntitlementBindingInformer
+		n.tierEntitlementBindingLister = tierEntitlementBindingInformer.Lister()
+		n.tierEntitlementBindingListerSynced = tierEntitlementBindingInformer.Informer().HasSynced
 		tierInformer.Informer().AddIndexers(
 			cache.Indexers{
 				PriorityIndex: func(obj interface{}) ([]string, error) {
@@ -288,6 +323,28 @@ func NewNetworkPolicyController(kubeClient clientset.Interface,
 						return []string{}, nil
 					}
 					return []string{cnp.Spec.Tier}, nil
+				},
+			},
+		)
+		tierEntitlementInformer.Informer().AddIndexers(
+			cache.Indexers{
+				TierIndex: func(obj interface{}) ([]string, error) {
+					te, ok := obj.(*crdv1alpha1.TierEntitlement)
+					if !ok || len(te.Spec.Tiers) == 0 {
+						return []string{}, nil
+					}
+					return te.Spec.Tiers, nil
+				},
+			},
+		)
+		tierEntitlementBindingInformer.Informer().AddIndexers(
+			cache.Indexers{
+				TierEntitlementIndex: func(obj interface{}) ([]string, error) {
+					teb, ok := obj.(*crdv1alpha1.TierEntitlementBinding)
+					if !ok {
+						return []string{}, nil
+					}
+					return []string{teb.Spec.TierEntitlement}, nil
 				},
 			},
 		)
@@ -328,6 +385,12 @@ func NewNetworkPolicyController(kubeClient clientset.Interface,
 		)
 	}
 	return n
+}
+
+// enableEnterpriseFeatures returns true if EnterpriseAntrea config option is
+// set to true.
+func (n *NetworkPolicyController) enableEnterpriseFeatures() bool {
+	return n.isEnterpriseAntrea
 }
 
 func (n *NetworkPolicyController) heartbeat(name string) {

@@ -27,7 +27,9 @@ import (
 	v1net "k8s.io/api/networking/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
+	crdv1a1 "github.com/vmware-tanzu/antrea/pkg/apis/crd/v1alpha1"
 	secv1alpha1 "github.com/vmware-tanzu/antrea/pkg/apis/security/v1alpha1"
+	secclientv1alpha1 "github.com/vmware-tanzu/antrea/pkg/client/clientset/versioned/typed/security/v1alpha1"
 )
 
 type KubernetesUtils struct {
@@ -303,23 +305,64 @@ func (k *KubernetesUtils) CleanACNPs() error {
 	return nil
 }
 
+func (k *KubernetesUtils) CreateOrUpdateACNPAsNonAdmin(cnp *secv1alpha1.ClusterNetworkPolicy) (*secv1alpha1.ClusterNetworkPolicy, error) {
+	return k.CreateOrUpdateACNP(cnp, false)
+}
+
+func (k *KubernetesUtils) CreateOrUpdateACNPAsAdmin(cnp *secv1alpha1.ClusterNetworkPolicy) (*secv1alpha1.ClusterNetworkPolicy, error) {
+	return k.CreateOrUpdateACNP(cnp, true)
+}
+
 // CreateOrUpdateACNP is a convenience function for updating/creating AntreaClusterNetworkPolicies.
-func (k *KubernetesUtils) CreateOrUpdateACNP(cnp *secv1alpha1.ClusterNetworkPolicy) (*secv1alpha1.ClusterNetworkPolicy, error) {
+func (k *KubernetesUtils) CreateOrUpdateACNP(cnp *secv1alpha1.ClusterNetworkPolicy, userAdmin bool) (*secv1alpha1.ClusterNetworkPolicy, error) {
 	log.Infof("creating/updating ClusterNetworkPolicy %s", cnp.Name)
-	cnpReturned, err := k.securityClient.ClusterNetworkPolicies().Get(context.TODO(), cnp.Name, metav1.GetOptions{})
+	var client secclientv1alpha1.SecurityV1alpha1Interface
+	if userAdmin {
+		client = k.securityClient
+	} else {
+		client = k.nonAdminSecClient
+	}
+	cnpReturned, err := client.ClusterNetworkPolicies().Get(context.TODO(), cnp.Name, metav1.GetOptions{})
 	if err != nil {
-		log.Debugf("creating ClusterNetworkPolicy %s", cnp.Name)
-		cnp, err = k.securityClient.ClusterNetworkPolicies().Create(context.TODO(), cnp, metav1.CreateOptions{})
+		log.Infof("creating ClusterNetworkPolicy %s", cnp.Name)
+		cnp, err = client.ClusterNetworkPolicies().Create(context.TODO(), cnp, metav1.CreateOptions{})
 		if err != nil {
-			log.Debugf("unable to create ClusterNetworkPolicy: %s", err)
+			log.Infof("unable to create ClusterNetworkPolicy: %s", err)
 		}
 		return cnp, err
 	} else if cnpReturned.Name != "" {
 		log.Debugf("ClusterNetworkPolicy with name %s already exists, updating", cnp.Name)
-		cnp, err = k.securityClient.ClusterNetworkPolicies().Update(context.TODO(), cnp, metav1.UpdateOptions{})
+		cnp, err = client.ClusterNetworkPolicies().Update(context.TODO(), cnp, metav1.UpdateOptions{})
 		return cnp, err
 	}
 	return nil, fmt.Errorf("error occurred in creating/updating ClusterNetworkPolicy %s", cnp.Name)
+}
+
+func (k *KubernetesUtils) DeleteACNPAsNonAdmin(name string) error {
+	return k.DeleteACNP(name, false)
+}
+
+func (k *KubernetesUtils) DeleteACNPAsAdmin(name string) error {
+	return k.DeleteACNP(name, true)
+}
+
+// DeleteACNP is a convenience function for deleting an Antrea ClusterNetworkPolicy with specific user.
+func (k *KubernetesUtils) DeleteACNP(name string, userAdmin bool) error {
+	var client secclientv1alpha1.SecurityV1alpha1Interface
+	if userAdmin {
+		client = k.securityClient
+	} else {
+		client = k.nonAdminSecClient
+	}
+	_, err := client.ClusterNetworkPolicies().Get(context.TODO(), name, metav1.GetOptions{})
+	if err != nil {
+		return errors.Wrapf(err, "unable to get ACNP %s", name)
+	}
+	log.Infof("deleting ACNP %s", name)
+	if err = client.ClusterNetworkPolicies().Delete(context.TODO(), name, metav1.DeleteOptions{}); err != nil {
+		return errors.Wrapf(err, "unable to delete ACNP %s", name)
+	}
+	return nil
 }
 
 // CleanANPs is a convenience function for deleting Antrea NetworkPolicies before startup of any new test.
@@ -340,23 +383,134 @@ func (k *KubernetesUtils) CleanANPs(namespaces []string) error {
 	return nil
 }
 
+func (k *KubernetesUtils) CreateOrUpdateANPAsNonAdmin(anp *secv1alpha1.NetworkPolicy) (*secv1alpha1.NetworkPolicy, error) {
+	return k.CreateOrUpdateANP(anp, false)
+}
+
+func (k *KubernetesUtils) CreateOrUpdateANPAsAdmin(anp *secv1alpha1.NetworkPolicy) (*secv1alpha1.NetworkPolicy, error) {
+	return k.CreateOrUpdateANP(anp, true)
+}
+
 // CreateOrUpdateANP is a convenience function for updating/creating Antrea NetworkPolicies.
-func (k *KubernetesUtils) CreateOrUpdateANP(anp *secv1alpha1.NetworkPolicy) (*secv1alpha1.NetworkPolicy, error) {
+func (k *KubernetesUtils) CreateOrUpdateANP(anp *secv1alpha1.NetworkPolicy, userAdmin bool) (*secv1alpha1.NetworkPolicy, error) {
 	log.Infof("creating/updating Antrea NetworkPolicy %s", anp.Name)
-	cnpReturned, err := k.securityClient.NetworkPolicies(anp.Namespace).Get(context.TODO(), anp.Name, metav1.GetOptions{})
+	var client secclientv1alpha1.SecurityV1alpha1Interface
+	if userAdmin {
+		client = k.securityClient
+	} else {
+		client = k.nonAdminSecClient
+	}
+	anpReturned, err := client.NetworkPolicies(anp.Namespace).Get(context.TODO(), anp.Name, metav1.GetOptions{})
 	if err != nil {
 		log.Debugf("creating Antrea NetworkPolicy %s", anp.Name)
-		anp, err = k.securityClient.NetworkPolicies(anp.Namespace).Create(context.TODO(), anp, metav1.CreateOptions{})
+		anp, err = client.NetworkPolicies(anp.Namespace).Create(context.TODO(), anp, metav1.CreateOptions{})
 		if err != nil {
 			log.Debugf("unable to create Antrea NetworkPolicy: %s", err)
 		}
 		return anp, err
-	} else if cnpReturned.Name != "" {
+	} else if anpReturned.Name != "" {
 		log.Debugf("Antrea NetworkPolicy with name %s already exists, updating", anp.Name)
-		anp, err = k.securityClient.NetworkPolicies(anp.Namespace).Update(context.TODO(), anp, metav1.UpdateOptions{})
+		anp, err = client.NetworkPolicies(anp.Namespace).Update(context.TODO(), anp, metav1.UpdateOptions{})
 		return anp, err
 	}
 	return nil, fmt.Errorf("error occurred in creating/updating Antrea NetworkPolicy %s", anp.Name)
+}
+
+func (k *KubernetesUtils) DeleteANPAsNonAdmin(ns, name string) error {
+	return k.DeleteANP(ns, name, false)
+}
+
+func (k *KubernetesUtils) DeleteANPAsAdmin(ns, name string) error {
+	return k.DeleteANP(ns, name, true)
+}
+
+// DeleteANP is a convenience function for deleting an Antrea NetworkPolicy with specific user.
+func (k *KubernetesUtils) DeleteANP(ns, name string, userAdmin bool) error {
+	var client secclientv1alpha1.SecurityV1alpha1Interface
+	if userAdmin {
+		client = k.securityClient
+	} else {
+		client = k.nonAdminSecClient
+	}
+	_, err := client.NetworkPolicies(ns).Get(context.TODO(), name, metav1.GetOptions{})
+	if err != nil {
+		return errors.Wrapf(err, "unable to get ANP %s/%s", ns, name)
+	}
+	log.Infof("deleting ANP %s/%s", ns, name)
+	if err = client.NetworkPolicies(ns).Delete(context.TODO(), name, metav1.DeleteOptions{}); err != nil {
+		return errors.Wrapf(err, "unable to delete ANP %s/%s", ns, name)
+	}
+	return nil
+}
+
+// CreateOrUpdateTierEntitlement is a convenience function for updating/creating TierEntitlement.
+func (k *KubernetesUtils) CreateOrUpdateTierEntitlement(te *crdv1a1.TierEntitlement) (*crdv1a1.TierEntitlement, error) {
+	log.Infof("creating/updating TierEntitlement %s", te.Name)
+	teReturned, err := k.crdv1a1Client.TierEntitlements().Get(context.TODO(), te.Name, metav1.GetOptions{})
+	if err != nil {
+		log.Debugf("creating TierEntitlement %s", te.Name)
+		te, err = k.crdv1a1Client.TierEntitlements().Create(context.TODO(), te, metav1.CreateOptions{})
+		if err != nil {
+			log.Debugf("unable to create TierEntitlement: %s", err)
+		}
+		return te, err
+	} else if teReturned.Name != "" {
+		log.Debugf("TierEntitlement with name %s already exists, updating", te.Name)
+		te, err = k.crdv1a1Client.TierEntitlements().Update(context.TODO(), te, metav1.UpdateOptions{})
+		return te, err
+	}
+	return nil, fmt.Errorf("error occurred in creating/updating TierEntitlement %s", te.Name)
+}
+
+// CleanTEs is a convenience function for deleting TierEntitlements before startup of any new test.
+func (k *KubernetesUtils) CleanTEs() error {
+	l, err := k.crdv1a1Client.TierEntitlements().List(context.TODO(), metav1.ListOptions{})
+	if err != nil {
+		return errors.Wrapf(err, "unable to list TierEntitlements")
+	}
+	for _, te := range l.Items {
+		log.Infof("deleting TierEntitlement %s", te.Name)
+		err = k.crdv1a1Client.TierEntitlements().Delete(context.TODO(), te.Name, metav1.DeleteOptions{})
+		if err != nil {
+			return errors.Wrapf(err, "unable to delete TierEntitlement %s", te.Name)
+		}
+	}
+	return nil
+}
+
+// CreateOrUpdateTierEntitlementBinding is a convenience function for updating/creating TierEntitlementBinding.
+func (k *KubernetesUtils) CreateOrUpdateTierEntitlementBinding(teb *crdv1a1.TierEntitlementBinding) (*crdv1a1.TierEntitlementBinding, error) {
+	log.Infof("creating/updating TierEntitlementBinding %s", teb.Name)
+	tebReturned, err := k.crdv1a1Client.TierEntitlementBindings().Get(context.TODO(), teb.Name, metav1.GetOptions{})
+	if err != nil {
+		log.Debugf("creating TierEntitlementBinding %s", teb.Name)
+		teb, err = k.crdv1a1Client.TierEntitlementBindings().Create(context.TODO(), teb, metav1.CreateOptions{})
+		if err != nil {
+			log.Debugf("unable to create TierEntitlementBinding: %s", err)
+		}
+		return teb, err
+	} else if tebReturned.Name != "" {
+		log.Debugf("TierEntitlementBinding with name %s already exists, updating", teb.Name)
+		teb, err = k.crdv1a1Client.TierEntitlementBindings().Update(context.TODO(), teb, metav1.UpdateOptions{})
+		return teb, err
+	}
+	return nil, fmt.Errorf("error occurred in creating/updating TierEntitlementBinding %s", teb.Name)
+}
+
+// CleanTEBs is a convenience function for deleting TierEntitlementBindings before startup of any new test.
+func (k *KubernetesUtils) CleanTEBs() error {
+	l, err := k.crdv1a1Client.TierEntitlementBindings().List(context.TODO(), metav1.ListOptions{})
+	if err != nil {
+		return errors.Wrapf(err, "unable to list TierEntitlementBindings")
+	}
+	for _, teb := range l.Items {
+		log.Infof("deleting TierEntitlementBinding %s", teb.Name)
+		err = k.crdv1a1Client.TierEntitlementBindings().Delete(context.TODO(), teb.Name, metav1.DeleteOptions{})
+		if err != nil {
+			return errors.Wrapf(err, "unable to delete TierEntitlementBinding %s", teb.Name)
+		}
+	}
+	return nil
 }
 
 func (k *KubernetesUtils) waitForPodInNamespace(ns string, pod string) (*string, error) {
