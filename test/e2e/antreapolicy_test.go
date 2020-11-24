@@ -162,7 +162,7 @@ func testMutateACNPNoTier(t *testing.T) {
 		SetPriority(10.0)
 	acnp := builder.Get()
 	log.Debugf("creating ACNP %v", acnp.Name)
-	acnp, err := k8sUtils.CreateOrUpdateACNPAsAdmin(acnp)
+	acnp, err := k8sUtils.CreateOrUpdateACNP(acnp, false)
 	if err != nil {
 		failOnError(fmt.Errorf("ACNP create failed %v", err), t)
 	}
@@ -180,7 +180,7 @@ func testMutateANPNoTier(t *testing.T) {
 		SetPriority(10.0)
 	anp := builder.Get()
 	log.Debugf("creating ANP %v", anp.Name)
-	anp, err := k8sUtils.CreateOrUpdateANPAsAdmin(anp)
+	anp, err := k8sUtils.CreateOrUpdateANP(anp, false)
 	if err != nil {
 		failOnError(fmt.Errorf("ANP create failed %v", err), t)
 	}
