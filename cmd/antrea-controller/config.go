@@ -40,6 +40,6 @@ type ControllerConfig struct {
 	// Defaults to true.
 	SelfSignedCert bool `yaml:"selfSignedCert,omitempty"`
 	// EnterpriseAntrea enables advanced features in Antrea.
-	// Defaults to false.
+	// Defaults to true.
 	EnterpriseAntrea bool `yaml:"enterpriseAntrea,omitempty"`
 }
