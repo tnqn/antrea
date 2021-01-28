@@ -35,6 +35,7 @@ import (
 	"github.com/vmware-tanzu/antrea/pkg/apiserver/openapi"
 	"github.com/vmware-tanzu/antrea/pkg/apiserver/storage"
 	crdinformers "github.com/vmware-tanzu/antrea/pkg/client/informers/externalversions"
+	"github.com/vmware-tanzu/antrea/pkg/controller/grouping"
 	"github.com/vmware-tanzu/antrea/pkg/controller/metrics"
 	"github.com/vmware-tanzu/antrea/pkg/controller/networkpolicy"
 	"github.com/vmware-tanzu/antrea/pkg/controller/networkpolicy/store"
@@ -110,13 +111,13 @@ func run(o *Options) error {
 	appliedToGroupStore := store.NewAppliedToGroupStore()
 	networkPolicyStore := store.NewNetworkPolicyStore()
 	groupStore := store.NewGroupStore()
+	groupEntityIndex := grouping.NewPodGroupIndex()
+	groupingController := grouping.NewController(groupEntityIndex, podInformer, namespaceInformer, externalEntityInformer)
 
 	networkPolicyController := networkpolicy.NewNetworkPolicyController(client,
 		crdClient,
-		podInformer,
-		namespaceInformer,
+		groupEntityIndex,
 		serviceInformer,
-		externalEntityInformer,
 		networkPolicyInformer,
 		cnpInformer,
 		anpInformer,
@@ -163,8 +164,8 @@ func run(o *Options) error {
 		addressGroupStore,
 		appliedToGroupStore,
 		networkPolicyStore,
-		groupStore,
 		controllerQuerier,
+		groupStore,
 		endpointQuerier,
 		networkPolicyController,
 		networkPolicyStatusController,
@@ -196,6 +197,8 @@ func run(o *Options) error {
 	crdInformerFactory.Start(stopCh)
 
 	go controllerMonitor.Run(stopCh)
+
+	go groupingController.Run(stopCh)
 
 	go networkPolicyController.Run(stopCh)
 
@@ -230,8 +233,8 @@ func createAPIServerConfig(kubeconfig string,
 	addressGroupStore storage.Interface,
 	appliedToGroupStore storage.Interface,
 	networkPolicyStore storage.Interface,
-	groupStore storage.Interface,
 	controllerQuerier querier.ControllerQuerier,
+	groupStore storage.Interface,
 	endpointQuerier networkpolicy.EndpointQuerier,
 	npController *networkpolicy.NetworkPolicyController,
 	networkPolicyStatusController *networkpolicy.StatusController,
