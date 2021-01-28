@@ -16,11 +16,10 @@ package networkpolicy
 
 import (
 	"context"
-	"fmt"
+	"reflect"
 
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/klog"
@@ -28,37 +27,27 @@ import (
 	"github.com/vmware-tanzu/antrea/pkg/apis/controlplane"
 	corev1a2 "github.com/vmware-tanzu/antrea/pkg/apis/core/v1alpha2"
 	secv1alpha1 "github.com/vmware-tanzu/antrea/pkg/apis/security/v1alpha1"
-	"github.com/vmware-tanzu/antrea/pkg/controller/networkpolicy/store"
 	antreatypes "github.com/vmware-tanzu/antrea/pkg/controller/types"
-	"github.com/vmware-tanzu/antrea/pkg/k8s"
 )
+
+type clusterGroup struct {
+	groupSelector *antreatypes.GroupSelector
+	ipBlock *controlplane.IPBlock
+}
 
 // addClusterGroup is responsible for processing the ADD event of a ClusterGroup resource.
 func (n *NetworkPolicyController) addClusterGroup(curObj interface{}) {
 	cg := curObj.(*corev1a2.ClusterGroup)
 	key := internalGroupKeyFunc(cg)
 	klog.V(2).Infof("Processing ADD event for ClusterGroup %s", cg.Name)
-	newGroup := n.processClusterGroup(cg)
-	klog.V(2).Infof("Creating new internal Group %s", newGroup.UID)
-	n.internalGroupStore.Create(newGroup)
 	n.enqueueInternalGroup(key)
 }
 
 // updateClusterGroup is responsible for processing the UPDATE event of a ClusterGroup resource.
 func (n *NetworkPolicyController) updateClusterGroup(oldObj, curObj interface{}) {
 	cg := curObj.(*corev1a2.ClusterGroup)
-	og := oldObj.(*corev1a2.ClusterGroup)
 	key := internalGroupKeyFunc(cg)
 	klog.V(2).Infof("Processing UPDATE event for ClusterGroup %s", cg.Name)
-	newGroup := n.processClusterGroup(cg)
-	oldGroup := n.processClusterGroup(og)
-	ipBlockUpdated := newGroup.IPBlock != oldGroup.IPBlock
-	svcRefUpdated := newGroup.ServiceReference != oldGroup.ServiceReference
-	if getNormalizedNameForSelector(newGroup.Selector) == getNormalizedNameForSelector(oldGroup.Selector) && !ipBlockUpdated && !svcRefUpdated {
-		// No change in the selectors of the ClusterGroup. No need to enqueue for further sync.
-		return
-	}
-	n.internalGroupStore.Update(newGroup)
 	n.enqueueInternalGroup(key)
 }
 
@@ -79,78 +68,16 @@ func (n *NetworkPolicyController) deleteClusterGroup(oldObj interface{}) {
 		}
 	}
 	key := internalGroupKeyFunc(og)
-	klog.V(2).Infof("Deleting internal Group %s", key)
-	err := n.internalGroupStore.Delete(key)
-	if err != nil {
-		klog.Errorf("Unable to delete internal Group %s from store: %v", key, err)
-	}
-}
-
-func (n *NetworkPolicyController) processClusterGroup(cg *corev1a2.ClusterGroup) *antreatypes.Group {
-	internalGroup := antreatypes.Group{
-		Name: cg.Name,
-		UID:  cg.UID,
-	}
-	if cg.Spec.IPBlock != nil {
-		ipb, _ := toAntreaIPBlockForCRD(cg.Spec.IPBlock)
-		internalGroup.IPBlock = ipb
-		return &internalGroup
-	}
-	svcSelector := cg.Spec.ServiceReference
-	if svcSelector != nil {
-		// ServiceReference will be converted to groupSelector once the internalGroup is synced.
-		internalGroup.ServiceReference = &controlplane.ServiceReference{
-			Namespace: svcSelector.Namespace,
-			Name:      svcSelector.Name,
-		}
-	} else {
-		groupSelector := toGroupSelector("", cg.Spec.PodSelector, cg.Spec.NamespaceSelector, cg.Spec.ExternalEntitySelector)
-		internalGroup.Selector = groupSelector
-	}
-	return &internalGroup
-}
-
-// filterInternalGroupsForPodOrExternalEntity computes a list of internal Group keys which match the
-// Pod/ExternalEntity's labels.
-func (n *NetworkPolicyController) filterInternalGroupsForPodOrExternalEntity(obj metav1.Object) sets.String {
-	matchingKeySet := sets.String{}
-	internalGroups := n.internalGroupStore.List()
-	ns, _ := n.namespaceLister.Get(obj.GetNamespace())
-	for _, group := range internalGroups {
-		key, _ := store.GroupKeyFunc(group)
-		g := group.(*antreatypes.Group)
-		if g.Selector != nil && n.labelsMatchGroupSelector(obj, ns, g.Selector) {
-			matchingKeySet.Insert(key)
-			klog.V(2).Infof("%s/%s matched internal Group %s", obj.GetNamespace(), obj.GetName(), key)
-		}
-	}
-	return matchingKeySet
-}
-
-// filterInternalGroupsForNamespace computes a list of internal Group keys which
-// match the Namespace's labels.
-func (n *NetworkPolicyController) filterInternalGroupsForNamespace(namespace *v1.Namespace) sets.String {
-	matchingKeys := sets.String{}
-	internalGroups := n.internalGroupStore.List()
-	for _, group := range internalGroups {
-		key, _ := store.GroupKeyFunc(group)
-		g := group.(*antreatypes.Group)
-		if g.Selector != nil && g.Selector.NamespaceSelector != nil && g.Selector.NamespaceSelector.Matches(labels.Set(namespace.Labels)) {
-			matchingKeys.Insert(key)
-			klog.V(2).Infof("Namespace %s matched internal Group %s", namespace.Name, key)
-		}
-	}
-	return matchingKeys
+	n.enqueueInternalGroup(key)
 }
 
 // filterInternalGroupsForService computes a list of internal Group keys which references the Service.
 func (n *NetworkPolicyController) filterInternalGroupsForService(obj metav1.Object) sets.String {
 	matchingKeySet := sets.String{}
 	indexKey, _ := cache.MetaNamespaceKeyFunc(obj)
-	matchedSvcGroups, _ := n.internalGroupStore.GetByIndex(store.ServiceIndex, indexKey)
-	for i := range matchedSvcGroups {
-		key, _ := store.GroupKeyFunc(matchedSvcGroups[i])
-		matchingKeySet.Insert(key)
+	matchedSvcGroups, _ := n.cgInformer.Informer().GetIndexer().ByIndex(ServiceIndex, indexKey)
+	for _, group := range matchedSvcGroups {
+		matchingKeySet.Insert(internalGroupKeyFunc(group.(*corev1a2.ClusterGroup)))
 	}
 	return matchingKeySet
 }
@@ -193,48 +120,41 @@ func (c *NetworkPolicyController) processNextInternalGroupWorkItem() bool {
 }
 
 func (n *NetworkPolicyController) syncInternalGroup(key string) error {
-	// Retrieve the internal Group corresponding to this key.
-	grpObj, found, _ := n.internalGroupStore.Get(key)
-	if !found {
-		klog.V(2).Infof("Internal group %s not found.", key)
-		return nil
-	}
-	grp := grpObj.(*antreatypes.Group)
 	// Retrieve the ClusterGroup corresponding to this key.
-	cg, err := n.cgLister.Get(grp.Name)
+	cg, err := n.cgLister.Get(key)
 	if err != nil {
-		klog.Infof("Didn't find the ClusterGroup %s, skip processing of internal group", grp.Name)
+		klog.Infof("Didn't find the ClusterGroup %s, skip processing of internal group", key)
+		delete(n.clusterGroupStore, key)
+		n.podLabelIndex.DeleteGroup(&GroupReference{Type:ClusterGroupType, Name: key})
 		return nil
 	}
-	selectorUpdated := n.processServiceReference(grp)
-	newMemberSet := controlplane.GroupMemberSet{}
-	if grp.Selector != nil {
-		// Find all Pods matching its selectors and update store.
-		pods, externalEntities := n.processSelector(*grp.Selector)
-		for _, pod := range pods {
-			if len(pod.Status.PodIPs) == 0 {
-				// No need to insert Pod IPAddress when it is unset.
-				continue
-			}
-			newMemberSet.Insert(podToGroupMember(pod, true))
+
+	group := &clusterGroup{}
+	if cg.Spec.IPBlock != nil {
+		group.ipBlock, _ = toAntreaIPBlockForCRD(cg.Spec.IPBlock)
+	} else if cg.Spec.ServiceReference != nil {
+		svc, err := n.serviceLister.Services(cg.Spec.ServiceReference.Namespace).Get(cg.Spec.ServiceReference.Name)
+		if err != nil {
+			klog.V(2).Infof("Error getting Service object %s/%s: %v, skip processing ClusterGroup %s", cg.Spec.ServiceReference.Namespace, cg.Spec.ServiceReference.Name, err, cg.Name)
+			return nil
 		}
-		for _, entity := range externalEntities {
-			newMemberSet.Insert(externalEntityToGroupMember(entity))
-		}
+		group.groupSelector = n.serviceToGroupSelector(svc)
+	} else {
+		group.groupSelector = toGroupSelector("", cg.Spec.PodSelector, cg.Spec.NamespaceSelector, cg.Spec.ExternalEntitySelector)
 	}
-	// for ipBlock Groups, newMemberSet and grp.GroupMembers will both be empty.
-	if selectorUpdated || !newMemberSet.Equal(grp.GroupMembers) {
-		// Update the internal Group object in the store with the Pods as GroupMembers.
-		updatedGrp := &antreatypes.Group{
-			UID:              grp.UID,
-			Name:             grp.Name,
-			Selector:         grp.Selector,
-			ServiceReference: grp.ServiceReference,
-			GroupMembers:     newMemberSet,
-		}
-		klog.V(2).Infof("Updating existing internal Group %s with %d GroupMembers", key, len(newMemberSet))
-		n.internalGroupStore.Update(updatedGrp)
+
+	oldGroup, exists := n.clusterGroupStore[key]
+	if exists && reflect.DeepEqual(oldGroup, group) {
+		return nil
 	}
+
+	if group.groupSelector != nil {
+		n.podLabelIndex.AddGroup(&GroupReference{Type:ClusterGroupType, Name: key}, group.groupSelector)
+	} else if exists && oldGroup.groupSelector != nil {
+		n.podLabelIndex.DeleteGroup(&GroupReference{Type:ClusterGroupType, Name: key})
+	}
+
+	n.clusterGroupStore[key] = group
 	// Update the ClusterGroup status to Realized as Antrea has recognized the Group and
 	// processed its group members.
 	err = n.updateGroupStatus(cg, v1.ConditionTrue)
@@ -328,26 +248,6 @@ func groupMembersComputedConditionEqual(conds []corev1a2.GroupCondition, conditi
 	return false
 }
 
-// processServiceReference knows how to process the serviceReference in the group, and set the group
-// selector based on the Service referenced. It returns true if the group's selector needs to be
-// updated after serviceReference processing, and false otherwise.
-func (n *NetworkPolicyController) processServiceReference(group *antreatypes.Group) bool {
-	svcRef := group.ServiceReference
-	if svcRef == nil {
-		return false
-	}
-	originalSelectorName := getNormalizedNameForSelector(group.Selector)
-	svc, err := n.serviceLister.Services(svcRef.Namespace).Get(svcRef.Name)
-	if err != nil {
-		klog.V(2).Infof("Error getting Service object %s/%s: %v, setting empty selector for Group %s", svcRef.Namespace, svcRef.Name, err, group.Name)
-		group.Selector = nil
-		return originalSelectorName == getNormalizedNameForSelector(nil)
-	}
-	newSelector := n.serviceToGroupSelector(svc)
-	group.Selector = newSelector
-	return originalSelectorName == getNormalizedNameForSelector(newSelector)
-}
-
 // serviceToGroupSelector knows how to generate GroupSelector for a Service.
 func (n *NetworkPolicyController) serviceToGroupSelector(service *v1.Service) *antreatypes.GroupSelector {
 	if len(service.Spec.Selector) == 0 {
@@ -366,24 +266,29 @@ func (n *NetworkPolicyController) serviceToGroupSelector(service *v1.Service) *a
 // GetAssociatedGroups retrieves the internal Groups associated with the entity being
 // queried (Pod or ExternalEntity identified by name and namespace).
 func (n *NetworkPolicyController) GetAssociatedGroups(name, namespace string) ([]antreatypes.Group, error) {
-	memberKey := k8s.NamespacedName(namespace, name)
-	groups, err := n.internalGroupStore.GetByIndex(store.GroupMemberIndex, memberKey)
-	if err != nil {
-		return nil, fmt.Errorf("failed to retrieve Group associated with key %s", memberKey)
-	}
+	//memberKey := k8s.NamespacedName(namespace, name)
+	groups := n.podLabelIndex.GetGroups(&v1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Namespace:namespace, Name: name},
+	})
+	//groups, err := n.internalGroupStore.GetByIndex(store.GroupMemberIndex, memberKey)
+	//if err != nil {
+	//	return nil, fmt.Errorf("failed to retrieve Group associated with key %s", memberKey)
+	//}
 	groupObjs := make([]antreatypes.Group, len(groups))
 	for i, g := range groups {
-		groupObjs[i] = *g.(*antreatypes.Group)
+		groupObjs[i].Name = g.Name
 	}
 	return groupObjs, nil
 }
 
 // GetGroupMembers returns the current members of a ClusterGroup.
 func (n *NetworkPolicyController) GetGroupMembers(cgName string) (controlplane.GroupMemberSet, error) {
-	g, found, err := n.internalGroupStore.Get(cgName)
-	if err != nil || !found {
-		return nil, fmt.Errorf("failed to get internal group associated with ClusterGroup %s", cgName)
-	}
-	internalGroup := g.(*antreatypes.Group)
-	return internalGroup.GroupMembers, nil
+	//entities, err := n.podLabelIndex.GetEntities(&GroupReference{Type:ClusterGroupType, Name:cgName})
+	return nil, nil
+	//g, found, err := n.internalGroupStore.Get(cgName)
+	//if err != nil || !found {
+	//	return nil, fmt.Errorf("failed to get internal group associated with ClusterGroup %s", cgName)
+	//}
+	//internalGroup := g.(*antreatypes.Group)
+	//return internalGroup.GroupMembers, nil
 }

@@ -127,6 +127,58 @@ func TestInitXLargeScaleWithSmallNamespaces(t *testing.T) {
 	testComputeNetworkPolicy(t, 10*time.Second, namespaces, networkPolicies, pods)
 }
 
+func TestInitXLargeScaleWithLargeNamespaces(t *testing.T) {
+	getObjects := func() ([]*corev1.Namespace, []*networkingv1.NetworkPolicy, []*corev1.Pod) {
+		namespace := rand.String(8)
+		namespaces := []*corev1.Namespace{
+			{
+				ObjectMeta: metav1.ObjectMeta{Name: namespace, Labels: map[string]string{"app": namespace}},
+			},
+		}
+		networkPolicies := []*networkingv1.NetworkPolicy{
+			{
+				ObjectMeta: metav1.ObjectMeta{Namespace: namespace, Name: "default-deny-all", UID: types.UID(uuid.New().String())},
+				Spec: networkingv1.NetworkPolicySpec{
+					PodSelector: metav1.LabelSelector{},
+					PolicyTypes: []networkingv1.PolicyType{networkingv1.PolicyTypeIngress, networkingv1.PolicyTypeEgress},
+				},
+			},
+		}
+		var pods []*corev1.Pod
+		for i:=0; i<100;i++ {
+			labels := map[string]string{fmt.Sprintf("app-%d", i): fmt.Sprintf("scale-%d", i)}
+			networkPolicies = append(networkPolicies, &networkingv1.NetworkPolicy{
+				ObjectMeta: metav1.ObjectMeta{Namespace: namespace, Name: fmt.Sprintf("np-%d", i), UID: types.UID(uuid.New().String())},
+				Spec: networkingv1.NetworkPolicySpec{
+					PodSelector: metav1.LabelSelector{MatchLabels: labels},
+					PolicyTypes: []networkingv1.PolicyType{networkingv1.PolicyTypeIngress, networkingv1.PolicyTypeEgress},
+					Ingress: []networkingv1.NetworkPolicyIngressRule{
+						{
+							From: []networkingv1.NetworkPolicyPeer{
+								{
+									PodSelector: &metav1.LabelSelector{
+										MatchLabels: labels,
+									},
+								},
+							},
+						},
+					},
+				},
+			})
+			for j:=0; j<10;j++ {
+				pods = append(pods, &corev1.Pod{
+					ObjectMeta: metav1.ObjectMeta{Namespace: namespace, Name: fmt.Sprintf("pod-%d-%d", i, j), UID: types.UID(uuid.New().String()), Labels: labels},
+					Spec:       corev1.PodSpec{NodeName: getRandomNodeName()},
+					Status:     corev1.PodStatus{PodIP: getRandomIP()},
+				})
+			}
+		}
+		return namespaces, networkPolicies, pods
+	}
+	namespaces, networkPolicies, pods := getXObjects(100, getObjects)
+	testComputeNetworkPolicy(t, 10*time.Second, namespaces, networkPolicies, pods)
+}
+
 /*
 TestInitXLargeScaleWithOneNamespaces tests the execution time and the memory usage of computing a scale
 of 1 Namespaces, 10k NetworkPolicies, 10k Pods where each network policy selects each pod (applied + ingress).

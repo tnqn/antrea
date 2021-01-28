@@ -336,3 +336,18 @@ type GroupAssociation struct {
 	// Pod/ExternalEntity being queried.
 	AssociatedGroups []GroupReference `json:"associatedGroups" protobuf:"bytes,2,rep,name=associatedGroups"`
 }
+
+// +genclient
+// +genclient:nonNamespaced
+// +genclient:onlyVerbs=list,get,watch
+// +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
+// NetworkPolicy is the message format of antrea/pkg/controller/types.NetworkPolicy in an API response.
+type EgressPolicy struct {
+	metav1.TypeMeta   `json:",inline"`
+	metav1.ObjectMeta `json:"metadata,omitempty" protobuf:"bytes,1,opt,name=metadata"`
+
+	// AppliedToGroups is a list of names of AppliedToGroups to which this policy applies.
+	AppliedToGroups []string `json:"appliedToGroups,omitempty" protobuf:"bytes,2,rep,name=appliedToGroups"`
+
+	EgressIP string
+}

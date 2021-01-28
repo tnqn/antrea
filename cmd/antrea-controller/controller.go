@@ -109,7 +109,6 @@ func run(o *Options) error {
 	addressGroupStore := store.NewAddressGroupStore()
 	appliedToGroupStore := store.NewAppliedToGroupStore()
 	networkPolicyStore := store.NewNetworkPolicyStore()
-	groupStore := store.NewGroupStore()
 
 	networkPolicyController := networkpolicy.NewNetworkPolicyController(client,
 		crdClient,
@@ -124,8 +123,7 @@ func run(o *Options) error {
 		cgInformer,
 		addressGroupStore,
 		appliedToGroupStore,
-		networkPolicyStore,
-		groupStore)
+		networkPolicyStore)
 
 	var networkPolicyStatusController *networkpolicy.StatusController
 	if features.DefaultFeatureGate.Enabled(features.AntreaPolicy) {
@@ -163,7 +161,6 @@ func run(o *Options) error {
 		addressGroupStore,
 		appliedToGroupStore,
 		networkPolicyStore,
-		groupStore,
 		controllerQuerier,
 		endpointQuerier,
 		networkPolicyController,
@@ -230,7 +227,6 @@ func createAPIServerConfig(kubeconfig string,
 	addressGroupStore storage.Interface,
 	appliedToGroupStore storage.Interface,
 	networkPolicyStore storage.Interface,
-	groupStore storage.Interface,
 	controllerQuerier querier.ControllerQuerier,
 	endpointQuerier networkpolicy.EndpointQuerier,
 	npController *networkpolicy.NetworkPolicyController,
@@ -287,7 +283,6 @@ func createAPIServerConfig(kubeconfig string,
 		addressGroupStore,
 		appliedToGroupStore,
 		networkPolicyStore,
-		groupStore,
 		caCertController,
 		statsAggregator,
 		controllerQuerier,

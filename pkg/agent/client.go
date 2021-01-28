@@ -15,9 +15,12 @@
 package agent
 
 import (
+	"crypto/tls"
+	"crypto/x509"
 	"fmt"
 	"io/ioutil"
 	"net"
+	"net/http"
 	"os"
 	"sync"
 
@@ -152,14 +155,23 @@ func inClusterConfig(caBundle []byte) (*rest.Config, error) {
 		return nil, err
 	}
 
+	var tlsConfig *tls.Config
+
 	tlsClientConfig := rest.TLSClientConfig{
 		CAData:     caBundle,
 		ServerName: cert.GetAntreaServerNames()[0],
 	}
 
+	certPool := x509.NewCertPool()
+	if !certPool.AppendCertsFromPEM(caBundle) {
+		return fmt.Errorf("...")
+	}
+	tlsConfig.ServerName = cert.GetAntreaServerNames()[0]
+	tlsConfig.RootCAs = certPool
+
 	return &rest.Config{
 		Host:            "https://" + net.JoinHostPort(host, port),
-		TLSClientConfig: tlsClientConfig,
+		Transport: 		 &http.Transport{TLSClientConfig: tlsConfig},
 		BearerToken:     string(token),
 		BearerTokenFile: tokenFile,
 	}, nil

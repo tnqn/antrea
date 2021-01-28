@@ -40,17 +40,12 @@ func (n *NetworkPolicyController) addExternalEntity(obj interface{}) {
 	appliedToGroupKeySet := n.filterAppliedToGroupsForPodOrExternalEntity(ee)
 	// Find all AddressGroup keys which match the ExternalEntity's labels.
 	addressGroupKeySet := n.filterAddressGroupsForPodOrExternalEntity(ee)
-	// Find all internal Group keys which match the ExternalEntity's labels.
-	groupKeySet := n.filterInternalGroupsForPodOrExternalEntity(ee)
 	// Enqueue groups to their respective queues for group processing.
 	for group := range appliedToGroupKeySet {
 		n.enqueueAppliedToGroup(group)
 	}
 	for group := range addressGroupKeySet {
 		n.enqueueAddressGroup(group)
-	}
-	for group := range groupKeySet {
-		n.enqueueInternalGroup(group)
 	}
 }
 
@@ -80,15 +75,12 @@ func (n *NetworkPolicyController) updateExternalEntity(oldObj, curObj interface{
 	// Find groups matching the old ExternalEntity's labels.
 	oldAppliedToGroupKeySet := n.filterAppliedToGroupsForPodOrExternalEntity(oldEE)
 	oldAddressGroupKeySet := n.filterAddressGroupsForPodOrExternalEntity(oldEE)
-	oldGroupKeySet := n.filterInternalGroupsForPodOrExternalEntity(oldEE)
 	// Find groups matching the new ExternalEntity's labels.
 	curAppliedToGroupKeySet := n.filterAppliedToGroupsForPodOrExternalEntity(curEE)
 	curAddressGroupKeySet := n.filterAddressGroupsForPodOrExternalEntity(curEE)
-	curGroupKeySet := n.filterInternalGroupsForPodOrExternalEntity(curEE)
 	// Create set to hold the group keys to enqueue.
 	var appliedToGroupKeys sets.String
 	var addressGroupKeys sets.String
-	var groupKeys sets.String
 	// AppliedToGroup keys must be enqueued only if the ExternalEntity's spec has changed or
 	// if ExternalEntity's label change causes it to match new Groups.
 	if !specEqual {
@@ -102,21 +94,16 @@ func (n *NetworkPolicyController) updateExternalEntity(oldObj, curObj interface{
 	// if ExternalEntity's label change causes it to match new Groups.
 	if !specEqual {
 		addressGroupKeys = oldAddressGroupKeySet.Union(curAddressGroupKeySet)
-		groupKeys = oldGroupKeySet.Union(curGroupKeySet)
 	} else if !labelsEqual {
 		// No need to enqueue common AddressGroups as they already have latest ExternalEntity
 		// information.
 		addressGroupKeys = oldAddressGroupKeySet.Difference(curAddressGroupKeySet).Union(curAddressGroupKeySet.Difference(oldAddressGroupKeySet))
-		groupKeys = oldGroupKeySet.Difference(curGroupKeySet).Union(curGroupKeySet.Difference(oldGroupKeySet))
 	}
 	for group := range appliedToGroupKeys {
 		n.enqueueAppliedToGroup(group)
 	}
 	for group := range addressGroupKeys {
 		n.enqueueAddressGroup(group)
-	}
-	for group := range groupKeys {
-		n.enqueueInternalGroup(group)
 	}
 }
 
@@ -143,16 +130,11 @@ func (n *NetworkPolicyController) deleteExternalEntity(old interface{}) {
 	appliedToGroupKeys := n.filterAppliedToGroupsForPodOrExternalEntity(ee)
 	// Find all AddressGroup keys which match the ExternalEntity's labels.
 	addressGroupKeys := n.filterAddressGroupsForPodOrExternalEntity(ee)
-	// Find all internal Group keys which match the ExternalEntity's labels.
-	groupKeys := n.filterInternalGroupsForPodOrExternalEntity(ee)
 	// Enqueue groups to their respective queues for group processing.
 	for group := range appliedToGroupKeys {
 		n.enqueueAppliedToGroup(group)
 	}
 	for group := range addressGroupKeys {
 		n.enqueueAddressGroup(group)
-	}
-	for group := range groupKeys {
-		n.enqueueInternalGroup(group)
 	}
 }

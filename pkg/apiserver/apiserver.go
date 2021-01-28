@@ -119,7 +119,7 @@ type completedConfig struct {
 
 func NewConfig(
 	genericConfig *genericapiserver.Config,
-	addressGroupStore, appliedToGroupStore, networkPolicyStore, groupStore storage.Interface,
+	addressGroupStore, appliedToGroupStore, networkPolicyStore storage.Interface,
 	caCertController *certificate.CACertController,
 	statsAggregator *stats.Aggregator,
 	controllerQuerier querier.ControllerQuerier,

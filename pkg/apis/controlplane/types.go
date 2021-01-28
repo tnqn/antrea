@@ -325,3 +325,13 @@ type GroupAssociation struct {
 	// Pod/ExternalEntity being queried.
 	AssociatedGroups []GroupReference
 }
+
+type EgressPolicy struct {
+	metav1.TypeMeta `json:",inline"`
+	// Standard metadata of the object.
+	metav1.ObjectMeta `json:"metadata,omitempty"`
+
+	AppliedToGroup string
+
+	EgressIP string
+}

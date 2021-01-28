@@ -1269,14 +1269,24 @@ func TestAddPod(t *testing.T) {
 			groupMatch:           true,
 		},
 	}
+	stopCh := make(chan struct{})
+	defer close(stopCh)
 	_, npc := newController()
+	npc.informerFactory.Start(stopCh)
 	npc.addNetworkPolicy(testNPObj)
+	npc.addNamespace(&corev1.Namespace{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "nsA",
+		},
+	})
 	groupKey := testCG.Name
 	npc.addClusterGroup(testCG)
 	npc.cgStore.Add(testCG)
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			npc.podStore.Add(tt.addedPod)
+			//npc.podStore.Add(tt.addedPod)
+			npc.addPod(tt.addedPod)
+			//npc.kubeClient.CoreV1().Pods(tt.addedPod.Namespace).Create(context.TODO(), tt.addedPod, metav1.CreateOptions{})
 			appGroupID := getNormalizedUID(toGroupSelector("nsA", &selectorSpec, nil, nil).NormalizedName)
 			inGroupID := getNormalizedUID(toGroupSelector("nsA", &selectorIn, nil, nil).NormalizedName)
 			outGroupID := getNormalizedUID(toGroupSelector("nsA", &selectorOut, nil, nil).NormalizedName)
@@ -1513,18 +1523,27 @@ func TestAddNamespace(t *testing.T) {
 			groupMatch:           true,
 		},
 	}
-	_, npc := newController()
-	npc.addNetworkPolicy(testNPObj)
-	npc.addClusterGroup(testCG)
-	npc.cgStore.Add(testCG)
-	groupKey := testCG.Name
+	//_, npc := newController()
+	//npc.addNetworkPolicy(testNPObj)
+	//npc.addClusterGroup(testCG)
+	//npc.cgStore.Add(testCG)
+	//groupKey := testCG.Name
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			npc.namespaceStore.Add(tt.addedNamespace)
+			_, npc := newController()
+			npc.addNetworkPolicy(testNPObj)
+			npc.addClusterGroup(testCG)
+			npc.cgStore.Add(testCG)
+			groupKey := testCG.Name
+
+			npc.addNamespace(tt.addedNamespace)
+			//npc.namespaceStore.Add(tt.addedNamespace)
 			p1 := getPod("p1", "nsA", "nodeA", "1.2.3.4", false)
 			p2 := getPod("p2", "nsA", "nodeA", "2.2.3.4", false)
-			npc.podStore.Add(p1)
-			npc.podStore.Add(p2)
+			npc.addPod(p1)
+			npc.addPod(p2)
+			//npc.podStore.Add(p1)
+			//npc.podStore.Add(p2)
 			inGroupID := getNormalizedUID(toGroupSelector("", nil, &selectorIn, nil).NormalizedName)
 			outGroupID := getNormalizedUID(toGroupSelector("", nil, &selectorOut, nil).NormalizedName)
 			npc.syncAddressGroup(inGroupID)
@@ -1809,8 +1828,8 @@ func TestAddAndUpdateService(t *testing.T) {
 	npc.cgStore.Add(testCG2)
 	npc.addClusterGroup(testCG1)
 	npc.addClusterGroup(testCG2)
-	npc.podStore.Add(testPod1)
-	npc.podStore.Add(testPod2)
+	npc.addPod(testPod1)
+	npc.addPod(testPod2)
 	npc.serviceStore.Add(testSvc1)
 	npc.serviceStore.Add(testSvc2)
 	npc.syncInternalGroup(testCG1.Name)
@@ -3136,8 +3155,8 @@ func TestGetAppliedToWorkloads(t *testing.T) {
 		},
 	}
 	_, c := newController()
-	c.podStore.Add(podA)
-	c.podStore.Add(podB)
+	c.addPod(podA)
+	c.addPod(podB)
 	c.cgStore.Add(&cgA)
 	c.cgStore.Add(&cgB)
 	c.addClusterGroup(&cgA)
