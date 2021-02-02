@@ -205,7 +205,7 @@ func (k *Kubernetes) CreateOrUpdateDeployment(ns, deploymentName string, replica
 		return v1.Container{
 			Name:            fmt.Sprintf("c%d", port),
 			ImagePullPolicy: v1.PullIfNotPresent,
-			Image:           "antrea/netpol-test:latest",
+			Image:           "projects.registry.vmware.com/antrea/netpol-test:latest",
 			// "-k" for persistent server
 			Command:         []string{"ncat", "-lk", "-p", fmt.Sprintf("%d", port)},
 			SecurityContext: &v1.SecurityContext{},
