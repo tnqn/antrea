@@ -18,6 +18,7 @@ import (
 	"crypto/tls"
 	"fmt"
 	"net"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -100,24 +101,15 @@ func (data *TestData) configureTLS(t *testing.T, cipherSuites []uint16, tlsMinVe
 }
 
 func (data *TestData) checkTLS(t *testing.T, podName string, containerName string, apiserver int, apiserverStr string) {
-	// 1. TLSMaxVersion unset, then a TLS1.3 Cipher Suite should be used.
-	stdouts := data.opensslConnect(t, podName, containerName, false, apiserver)
-	for _, stdout := range stdouts {
-		oneTLS13CS := false
-		for _, cs := range opensslTLS13CipherSuites {
-			if strings.Contains(stdout, fmt.Sprintf("New, TLSv1.3, Cipher is %s", cs)) {
-				oneTLS13CS = true
-				break
-			}
-		}
-		assert.True(t, oneTLS13CS,
-			"Cipher Suite used by %s apiserver should be a TLS1.3 one, output: %s", apiserverStr, stdout)
+	// Set TLSMaxVersion to TLS1.2, then TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256 should be used
+	stdouts := data.opensslConnect(t, podName, containerName, true, apiserver)
+	matchMsg := "New, TLSv1/SSLv3, Cipher is %s"
+	oldOpenssl := data.isOldOpenssl(t, podName, containerName)
+	if !oldOpenssl {
+		matchMsg = "New, TLSv1.2, Cipher is %s"
 	}
-
-	// 2. Set TLSMaxVersion to TLS1.2, then TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256 should be used
-	stdouts = data.opensslConnect(t, podName, containerName, true, apiserver)
 	for _, stdout := range stdouts {
-		assert.True(t, strings.Contains(stdout, fmt.Sprintf("New, TLSv1.2, Cipher is %s", cipherSuiteStr)),
+		assert.True(t, strings.Contains(stdout, fmt.Sprintf(matchMsg, cipherSuiteStr)),
 			"Cipher Suite used by %s apiserver should be the TLS1.2 one '%s', output: %s", apiserverStr, cipherSuiteStr, stdout)
 	}
 }
@@ -127,24 +119,17 @@ func (data *TestData) opensslConnect(t *testing.T, pod string, container string,
 	opensslConnectCommands := []struct {
 		enabled bool
 		ip      string
-		option  string
 	}{
 		{
 			clusterInfo.podV4NetworkCIDR != "",
 			"127.0.0.1",
-			"-4",
-		},
-		{
-			clusterInfo.podV6NetworkCIDR != "",
-			"::1",
-			"-6",
 		},
 	}
 	for _, c := range opensslConnectCommands {
 		if !c.enabled {
 			continue
 		}
-		cmd := []string{"timeout", "1", "openssl", "s_client", "-connect", net.JoinHostPort(c.ip, fmt.Sprint(port)), c.option}
+		cmd := []string{"timeout", "1", "openssl", "s_client", "-connect", net.JoinHostPort(c.ip, fmt.Sprint(port))}
 		if tls12 {
 			cmd = append(cmd, "-tls1_2")
 		}
@@ -154,4 +139,37 @@ func (data *TestData) opensslConnect(t *testing.T, pod string, container string,
 		stdouts = append(stdouts, stdout)
 	}
 	return stdouts
+}
+
+func (data *TestData) isOldOpenssl(t *testing.T, pod string, container string) bool {
+	cmd := []string{"openssl", "version"}
+	stdout, stderr, err := data.RunCommandFromPod(antreaNamespace, pod, container, cmd)
+	// sample output: OpenSSL 1.1.1  11 Sep 2018
+	if err != nil {
+		t.Fatalf("Failed to get openssl version, error: %v", err)
+	}
+	if stderr != "" {
+		t.Fatalf("Failed to get openssl version, stderr: %s", stderr)
+	}
+
+	outSlice := strings.Split(stdout, " ")
+	if len(outSlice) < 2 {
+		t.Fatalf("Failed to get openssl version, version output has incorrect length")
+	}
+	verDetail := strings.Split(outSlice[1], ".")
+	if len(verDetail) < 2 {
+		t.Fatalf("Failed to get openssl version, version number output has incorrect length")
+	}
+	firstDigit, err := strconv.Atoi(verDetail[0])
+	if err != nil {
+		t.Fatalf("Failed to convert string to int: %v", err)
+	}
+	secondDigit, err := strconv.Atoi(verDetail[1])
+	if err != nil {
+		t.Fatalf("Failed to convert string to int: %v", err)
+	}
+	if (firstDigit == 1 && secondDigit >= 1) || firstDigit > 1 {
+		return false
+	}
+	return true
 }
