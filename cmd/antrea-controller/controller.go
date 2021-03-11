@@ -62,6 +62,7 @@ import (
 	"antrea.io/antrea/pkg/controller/supportbundlecollection"
 	supportbundlecollectionstore "antrea.io/antrea/pkg/controller/supportbundlecollection/store"
 	"antrea.io/antrea/pkg/controller/traceflow"
+	"antrea.io/antrea/pkg/controller/usagereport"
 	"antrea.io/antrea/pkg/features"
 	"antrea.io/antrea/pkg/log"
 	"antrea.io/antrea/pkg/monitor"
@@ -256,6 +257,22 @@ func run(o *Options) error {
 			informerFactory,
 			crdInformerFactory)
 	}
+	var usageReporter *usagereport.Reporter
+	if o.config.EnableUsageReporting {
+		clusterIdentityProvider := clusteridentity.NewClusterIdentityProvider(
+			env.GetAntreaNamespace(),
+			clusteridentity.DefaultClusterIdentityConfigMapName,
+			client,
+		)
+		usageReporter = usagereport.NewReporter(
+			client,
+			nodeInformer,
+			podInformer,
+			namespaceInformer,
+			clusterIdentityProvider,
+			networkPolicyController,
+		)
+	}
 
 	apiServerConfig, err := createAPIServerConfig(o.config.ClientConnection.Kubeconfig,
 		client,
@@ -386,6 +403,9 @@ func run(o *Options) error {
 
 	if antreaIPAMController != nil {
 		go antreaIPAMController.Run(stopCh)
+	}
+	if o.config.EnableUsageReporting {
+		go usageReporter.Run(stopCh)
 	}
 
 	if features.DefaultFeatureGate.Enabled(features.IPsecCertAuth) {

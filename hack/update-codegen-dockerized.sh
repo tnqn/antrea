@@ -58,8 +58,9 @@ MOCKGEN_TARGETS=(
   "pkg/agent/util/ipset Interface testing"
   "pkg/agent/util/iptables Interface testing mock_iptables_linux.go" # Must specify linux.go suffix, otherwise compilation would fail on windows platform as source file has linux build tag.
   "pkg/agent/util/netlink Interface testing mock_netlink_linux.go"
+  "pkg/clusteridentity ClusterIdentityProvider testing"
   "pkg/antctl AntctlClient ."
-  "pkg/controller/networkpolicy EndpointQuerier testing"
+  "pkg/controller/networkpolicy EndpointQuerier,NetworkPolicyUsageReporter testing"
   "pkg/controller/querier ControllerQuerier testing"
   "pkg/flowaggregator/exporter Interface testing"
   "pkg/ipfix IPFIXExportingProcess,IPFIXRegistry,IPFIXCollectingProcess,IPFIXAggregationProcess testing"

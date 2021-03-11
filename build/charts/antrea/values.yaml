@@ -287,6 +287,8 @@ controller:
     resources:
       requests:
         cpu: "200m"
+  # -- Enables usage reporting.
+  enableUsageReporting: false
 
 flowCollector:
   # -- IPFIX collector address as a string with format <HOST>:[<PORT>][:<PROTO>].
