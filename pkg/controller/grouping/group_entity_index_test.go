@@ -28,8 +28,8 @@ import (
 )
 
 const (
-	groupType1 = "fakeGroup1"
-	groupType2 = "fakeGroup2"
+	groupType1 GroupType = "fakeGroup1"
+	groupType2 GroupType = "fakeGroup2"
 )
 
 var (
@@ -56,7 +56,7 @@ var (
 )
 
 type group struct {
-	groupType     string
+	groupType     GroupType
 	groupName     string
 	groupSelector *types.GroupSelector
 }
@@ -188,7 +188,7 @@ func TestGroupEntityIndexEventHandlers(t *testing.T) {
 		addedPod                 *v1.Pod
 		deletedPod               *v1.Pod
 		addedNamespace           *v1.Namespace
-		expectedGroupsCalled     map[string][]string
+		expectedGroupsCalled     map[GroupType][]string
 	}{
 		{
 			name:                     "add a new pod",
@@ -196,7 +196,7 @@ func TestGroupEntityIndexEventHandlers(t *testing.T) {
 			existingExternalEntities: []*v1alpha2.ExternalEntity{eeFoo1, eeBar1, eeFoo1InOtherNamespace},
 			existingGroups:           []*group{groupPodFooType1, groupPodBarType1, groupPodFooType2, groupPodFooAllNamespaceType1, groupEEFooType1},
 			addedPod:                 podFoo2,
-			expectedGroupsCalled:     map[string][]string{groupType1: {groupPodFooType1.groupName, groupPodFooAllNamespaceType1.groupName}, groupType2: {groupPodFooType2.groupName}},
+			expectedGroupsCalled:     map[GroupType][]string{groupType1: {groupPodFooType1.groupName, groupPodFooAllNamespaceType1.groupName}, groupType2: {groupPodFooType2.groupName}},
 		},
 		{
 			name:                     "update an existing pod's labels",
@@ -206,7 +206,7 @@ func TestGroupEntityIndexEventHandlers(t *testing.T) {
 			addedPod: copyAndMutatePod(podFoo1, func(pod *v1.Pod) {
 				pod.Labels = map[string]string{"app": "bar"}
 			}),
-			expectedGroupsCalled: map[string][]string{groupType1: {groupPodFooType1.groupName, groupPodFooAllNamespaceType1.groupName}},
+			expectedGroupsCalled: map[GroupType][]string{groupType1: {groupPodFooType1.groupName, groupPodFooAllNamespaceType1.groupName}},
 		},
 		{
 			name:                     "update an existing pod's attributes",
@@ -216,7 +216,7 @@ func TestGroupEntityIndexEventHandlers(t *testing.T) {
 			addedPod: copyAndMutatePod(podFoo1, func(pod *v1.Pod) {
 				pod.Status.PodIP = "2.2.2.2"
 			}),
-			expectedGroupsCalled: map[string][]string{groupType1: {groupPodFooType1.groupName, groupPodFooAllNamespaceType1.groupName, groupPodAllNamespaceType1.groupName}},
+			expectedGroupsCalled: map[GroupType][]string{groupType1: {groupPodFooType1.groupName, groupPodFooAllNamespaceType1.groupName, groupPodAllNamespaceType1.groupName}},
 		},
 		{
 			name:                     "update an existing pod's annotations",
@@ -226,7 +226,7 @@ func TestGroupEntityIndexEventHandlers(t *testing.T) {
 			addedPod: copyAndMutatePod(podFoo1, func(pod *v1.Pod) {
 				pod.Annotations = map[string]string{"foo": "bar"}
 			}),
-			expectedGroupsCalled: map[string][]string{},
+			expectedGroupsCalled: map[GroupType][]string{},
 		},
 		{
 			name:                     "delete an existing pod",
@@ -234,7 +234,7 @@ func TestGroupEntityIndexEventHandlers(t *testing.T) {
 			existingExternalEntities: []*v1alpha2.ExternalEntity{eeFoo1, eeBar1, eeFoo1InOtherNamespace},
 			existingGroups:           []*group{groupPodFooType1, groupPodFooAllNamespaceType1, groupEEFooType1, groupPodAllNamespaceType1},
 			deletedPod:               podFoo1,
-			expectedGroupsCalled:     map[string][]string{groupType1: {groupPodFooType1.groupName, groupPodFooAllNamespaceType1.groupName, groupPodAllNamespaceType1.groupName}},
+			expectedGroupsCalled:     map[GroupType][]string{groupType1: {groupPodFooType1.groupName, groupPodFooAllNamespaceType1.groupName, groupPodAllNamespaceType1.groupName}},
 		},
 		{
 			name:                     "update an existing namespace's labels",
@@ -248,7 +248,7 @@ func TestGroupEntityIndexEventHandlers(t *testing.T) {
 			addedNamespace: copyAndMutateNamespace(nsDefault, func(namespace *v1.Namespace) {
 				namespace.Labels["foo"] = "bar"
 			}),
-			expectedGroupsCalled: map[string][]string{groupType1: {"groupWithNamespaceSelector"}},
+			expectedGroupsCalled: map[GroupType][]string{groupType1: {"groupWithNamespaceSelector"}},
 		},
 	}
 	for _, tt := range tests {
@@ -260,9 +260,9 @@ func TestGroupEntityIndexEventHandlers(t *testing.T) {
 			go index.Run(stopCh)
 
 			var lock sync.Mutex
-			actualGroupsCalled := map[string][]string{}
+			actualGroupsCalled := map[GroupType][]string{}
 			for groupType := range tt.expectedGroupsCalled {
-				index.AddEventHandler(groupType, func(gType string) eventHandler {
+				index.AddEventHandler(groupType, func(gType GroupType) eventHandler {
 					return func(group string) {
 						lock.Lock()
 						defer lock.Unlock()

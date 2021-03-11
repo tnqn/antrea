@@ -83,9 +83,9 @@ const (
 	// ClusterGroupIndex is used to index ClusterNetworkPolicies by ClusterGroup names.
 	ClusterGroupIndex = "clustergroup"
 
-	appliedToGroupType = "appliedToGroup"
-	addressGroupType   = "addressGroup"
-	clusterGroupType   = "clusterGroup"
+	appliedToGroupType grouping.GroupType = "appliedToGroup"
+	addressGroupType   grouping.GroupType = "addressGroup"
+	clusterGroupType   grouping.GroupType = "clusterGroup"
 )
 
 var (

@@ -36,18 +36,18 @@ import (
 // callbacks that will be called when a specific type of groups' entities are updated.
 type Interface interface {
 	// AddGroup adds or updates a group to the index. The caller can then get entities selected by this group.
-	AddGroup(groupType string, name string, selector *types.GroupSelector)
+	AddGroup(groupType GroupType, name string, selector *types.GroupSelector)
 	// DeleteGroup deletes a group from the index.
-	DeleteGroup(groupType string, name string)
+	DeleteGroup(groupType GroupType, name string)
 	// AddEventHandler registers an eventHandler for the given type of groups. When any Pod/ExternelEntity/Namespace
 	// update affects the given kind of groups, the eventHandler will be called with the affected groups.
-	AddEventHandler(groupType string, handler eventHandler)
+	AddEventHandler(groupType GroupType, handler eventHandler)
 	// GetEntities returns the selected Pods or ExternalEntities for the given group.
-	GetEntities(groupType string, name string) ([]*v1.Pod, []*v1alpha2.ExternalEntity)
+	GetEntities(groupType GroupType, name string) ([]*v1.Pod, []*v1alpha2.ExternalEntity)
 	// GetGroupsForPod returns the groups that select the given Pod.
-	GetGroupsForPod(namespace, name string) (map[string][]string, bool)
+	GetGroupsForPod(namespace, name string) (map[GroupType][]string, bool)
 	// GetGroupsForExternalEntity returns the groups that select the given ExternalEntity.
-	GetGroupsForExternalEntity(namespace, name string) (map[string][]string, bool)
+	GetGroupsForExternalEntity(namespace, name string) (map[GroupType][]string, bool)
 	// AddPod adds or updates a Pod to the index. If any existing groups are affected, eventHandlers will be called with
 	// the affected groups.
 	AddPod(pod *v1.Pod)
@@ -80,6 +80,9 @@ const (
 	externalEntityType
 )
 
+// GroupType is an public type used to differentiate Groups.
+type GroupType string
+
 // entityItem contains an entity (either Pod or ExternalEntity) and some relevant information.
 type entityItem struct {
 	// entity is either a Pod or an ExternalEntity.
@@ -107,7 +110,7 @@ type labelItem struct {
 // groupItem contains a group's metadata and its selector.
 type groupItem struct {
 	// The type of the group.
-	groupType string
+	groupType GroupType
 	// The name of the group. It must be unique within its own type.
 	name string
 	// The selector of the group.
@@ -168,7 +171,7 @@ type GroupEntityIndex struct {
 
 	// eventHandlers is a map from group type to a list of handlers. When a type of group's updated, the corresponding
 	// event handlers will be called with the group name provided.
-	eventHandlers map[string][]eventHandler
+	eventHandlers map[GroupType][]eventHandler
 
 	// eventChan is channel used for calling eventHandlers asynchronously.
 	eventChan chan string
@@ -184,13 +187,13 @@ func NewPodGroupIndex() *GroupEntityIndex {
 		selectorItems:     map[string]*selectorItem{},
 		selectorItemIndex: map[entityType]map[string]sets.String{podEntityType: {}, externalEntityType: {}},
 		namespaceLabels:   map[string]labels.Set{},
-		eventHandlers:     map[string][]eventHandler{},
+		eventHandlers:     map[GroupType][]eventHandler{},
 		eventChan:         make(chan string, 1000),
 	}
 	return index
 }
 
-func (i *GroupEntityIndex) GetEntities(groupType string, name string) ([]*v1.Pod, []*v1alpha2.ExternalEntity) {
+func (i *GroupEntityIndex) GetEntities(groupType GroupType, name string) ([]*v1.Pod, []*v1alpha2.ExternalEntity) {
 	gKey := getGroupItemKey(groupType, name)
 
 	i.lock.RLock()
@@ -222,15 +225,15 @@ func (i *GroupEntityIndex) GetEntities(groupType string, name string) ([]*v1.Pod
 	return pods, externalEntities
 }
 
-func (i *GroupEntityIndex) GetGroupsForPod(namespace, name string) (map[string][]string, bool) {
+func (i *GroupEntityIndex) GetGroupsForPod(namespace, name string) (map[GroupType][]string, bool) {
 	return i.getGroups(podEntityType, namespace, name)
 }
 
-func (i *GroupEntityIndex) GetGroupsForExternalEntity(namespace, name string) (map[string][]string, bool) {
+func (i *GroupEntityIndex) GetGroupsForExternalEntity(namespace, name string) (map[GroupType][]string, bool) {
 	return i.getGroups(externalEntityType, namespace, name)
 }
 
-func (i *GroupEntityIndex) getGroups(entityType entityType, namespace, name string) (map[string][]string, bool) {
+func (i *GroupEntityIndex) getGroups(entityType entityType, namespace, name string) (map[GroupType][]string, bool) {
 	eKey := getEntityItemKeyByName(entityType, namespace, name)
 
 	i.lock.RLock()
@@ -242,7 +245,7 @@ func (i *GroupEntityIndex) getGroups(entityType entityType, namespace, name stri
 		return nil, false
 	}
 
-	groups := map[string][]string{}
+	groups := map[GroupType][]string{}
 	lItem, _ := i.labelItems[eItem.labelItemKey]
 	// Get the keys of the selectorItems the labelItem matches.
 	for sKey := range lItem.selectorItemKeys {
@@ -292,9 +295,9 @@ func (i *GroupEntityIndex) DeleteNamespace(namespace *v1.Namespace) {
 	delete(i.namespaceLabels, namespace.Name)
 }
 
-// deletePodFromLabelItem disconnects an entityItem from a labelItem.
+// deleteEntityFromLabelItem disconnects an entityItem from a labelItem.
 // The labelItem will be deleted if it's no longer used by any entityItem.
-func (i *GroupEntityIndex) deletePodFromLabelItem(label, entity string) *labelItem {
+func (i *GroupEntityIndex) deleteEntityFromLabelItem(label, entity string) *labelItem {
 	lItem, _ := i.labelItems[label]
 	lItem.entityItemKeys.Delete(entity)
 	// If the labelItem is still used by any entities, keep it. Otherwise delete it.
@@ -391,7 +394,7 @@ func (i *GroupEntityIndex) addEntity(entityType entityType, entity metav1.Object
 			return
 		}
 		// Delete the Pod from the previous labelItem as its label is updated.
-		oldLabelItem = i.deletePodFromLabelItem(eItem.labelItemKey, eKey)
+		oldLabelItem = i.deleteEntityFromLabelItem(eItem.labelItemKey, eKey)
 		eItem.labelItemKey = lKey
 	} else {
 		entityUpdated = true
@@ -447,7 +450,7 @@ func (i *GroupEntityIndex) deleteEntity(entityType entityType, entity metav1.Obj
 	}
 
 	// Delete the entity from its associated labelItem and entityItems.
-	lItem := i.deletePodFromLabelItem(eItem.labelItemKey, eKey)
+	lItem := i.deleteEntityFromLabelItem(eItem.labelItemKey, eKey)
 	delete(i.entityItems, eKey)
 
 	// All selectorItems that match the labelItem are affected.
@@ -553,7 +556,7 @@ func (i *GroupEntityIndex) syncSelector(sItem *selectorItem) bool {
 	return updated
 }
 
-func (i *GroupEntityIndex) AddGroup(groupType string, name string, selector *types.GroupSelector) {
+func (i *GroupEntityIndex) AddGroup(groupType GroupType, name string, selector *types.GroupSelector) {
 	gKey := getGroupItemKey(groupType, name)
 	sKey := getSelectorItemKey(selector)
 
@@ -587,7 +590,7 @@ func (i *GroupEntityIndex) AddGroup(groupType string, name string, selector *typ
 	sItem.groupItemKeys.Insert(gKey)
 }
 
-func (i *GroupEntityIndex) DeleteGroup(groupType string, name string) {
+func (i *GroupEntityIndex) DeleteGroup(groupType GroupType, name string) {
 	gKey := getGroupItemKey(groupType, name)
 
 	i.lock.Lock()
@@ -619,7 +622,7 @@ func (i *GroupEntityIndex) Run(stopCh <-chan struct{}) {
 			return
 		case group := <-i.eventChan:
 			parts := strings.Split(group, "/")
-			groupType, name := parts[0], parts[1]
+			groupType, name := GroupType(parts[0]), parts[1]
 			for _, handler := range i.eventHandlers[groupType] {
 				handler(name)
 			}
@@ -627,7 +630,7 @@ func (i *GroupEntityIndex) Run(stopCh <-chan struct{}) {
 	}
 }
 
-func (i *GroupEntityIndex) AddEventHandler(groupType string, handler eventHandler) {
+func (i *GroupEntityIndex) AddEventHandler(groupType GroupType, handler eventHandler) {
 	i.eventHandlers[groupType] = append(i.eventHandlers[groupType], handler)
 }
 
@@ -683,7 +686,7 @@ func entityAttrsUpdated(oldEntity, newEntity metav1.Object) bool {
 	switch oldValue := oldEntity.(type) {
 	case *v1.Pod:
 		// For Pod, we only care about PodIP and NodeName update.
-		// Some other attributes we care are immutable, e.g. the named ContainerPort.
+		// Some other attributes we care about are immutable, e.g. the named ContainerPort.
 		newValue := newEntity.(*v1.Pod)
 		if oldValue.Status.PodIP != newValue.Status.PodIP {
 			return true
@@ -718,8 +721,8 @@ func getLabelItemKey(entityType entityType, obj metav1.Object) string {
 }
 
 // getGroupItemKey returns the group key used in groupItems.
-func getGroupItemKey(groupType string, name string) string {
-	return groupType + "/" + name
+func getGroupItemKey(groupType GroupType, name string) string {
+	return string(groupType) + "/" + name
 }
 
 // getSelectorItemKey returns the selector key used in selectorItems.
