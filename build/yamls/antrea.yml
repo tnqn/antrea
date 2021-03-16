@@ -309,6 +309,30 @@ kind: CustomResourceDefinition
 metadata:
   labels:
     app: antrea
+  name: egresses.egress.antrea.tanzu.vmware.com
+spec:
+  group: egress.antrea.tanzu.vmware.com
+  names:
+    kind: Egress
+    plural: egresses
+    shortNames:
+    - eg
+    singular: egress
+  scope: Cluster
+  versions:
+  - name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        type: object
+        x-kubernetes-preserve-unknown-fields: true
+    served: true
+    storage: true
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  labels:
+    app: antrea
   name: externalentities.core.antrea.tanzu.vmware.com
 spec:
   group: core.antrea.tanzu.vmware.com
@@ -1039,6 +1063,14 @@ rules:
 - apiGroups:
   - controlplane.antrea.tanzu.vmware.com
   resources:
+  - egressgroups
+  verbs:
+  - get
+  - watch
+  - list
+- apiGroups:
+  - controlplane.antrea.tanzu.vmware.com
+  resources:
   - nodestatssummaries
   verbs:
   - create
@@ -1094,6 +1126,14 @@ rules:
   - patch
   - create
   - delete
+- apiGroups:
+  - egress.antrea.tanzu.vmware.com
+  resources:
+  - egresses
+  verbs:
+  - get
+  - watch
+  - list
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
@@ -1259,6 +1299,14 @@ rules:
   - watch
   - list
 - apiGroups:
+  - egress.antrea.tanzu.vmware.com
+  resources:
+  - egresses
+  verbs:
+  - get
+  - watch
+  - list
+- apiGroups:
   - core.antrea.tanzu.vmware.com
   resources:
   - clustergroups/status
@@ -1359,6 +1407,9 @@ data:
 
     # Enable collecting and exposing NetworkPolicy statistics.
     #  NetworkPolicyStats: false
+
+    # Enable controlling SNAT IPs of Pod egress traffic.
+    #  Egress: false
 
     # Name of the OpenVSwitch bridge antrea-agent will create and use.
     # Make sure it doesn't conflict with your existing OpenVSwitch bridges.
@@ -1513,6 +1564,9 @@ data:
     # Enable collecting and exposing NetworkPolicy statistics.
     #  NetworkPolicyStats: false
 
+    # Enable controlling SNAT IPs of Pod egress traffic.
+    #  Egress: false
+
     # The port for the antrea-controller APIServer to serve on.
     # Note that if it's set to another value, the `containerPort` of the `api` port of the
     # `antrea-controller` container must be set to the same value.
@@ -1543,7 +1597,7 @@ metadata:
   annotations: {}
   labels:
     app: antrea
-  name: antrea-config-7ghm8d9bm9
+  name: antrea-config-7tt2t8mbc7
   namespace: kube-system
 ---
 apiVersion: v1
@@ -1663,7 +1717,7 @@ spec:
         key: node-role.kubernetes.io/master
       volumes:
       - configMap:
-          name: antrea-config-7ghm8d9bm9
+          name: antrea-config-7tt2t8mbc7
         name: antrea-config
       - name: antrea-controller-tls
         secret:
@@ -1927,7 +1981,7 @@ spec:
         operator: Exists
       volumes:
       - configMap:
-          name: antrea-config-7ghm8d9bm9
+          name: antrea-config-7tt2t8mbc7
         name: antrea-config
       - hostPath:
           path: /etc/cni/net.d

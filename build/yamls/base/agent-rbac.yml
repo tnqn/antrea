@@ -67,6 +67,14 @@ rules:
   - apiGroups:
       - controlplane.antrea.tanzu.vmware.com
     resources:
+      - egressgroups
+    verbs:
+      - get
+      - watch
+      - list
+  - apiGroups:
+      - controlplane.antrea.tanzu.vmware.com
+    resources:
       - nodestatssummaries
     verbs:
       - create
@@ -128,6 +136,14 @@ rules:
       - patch
       - create
       - delete
+  - apiGroups:
+      - egress.antrea.tanzu.vmware.com
+    resources:
+      - egresses
+    verbs:
+      - get
+      - watch
+      - list
 ---
 kind: ClusterRoleBinding
 apiVersion: rbac.authorization.k8s.io/v1
