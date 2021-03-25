@@ -1409,7 +1409,7 @@ data:
     #  NetworkPolicyStats: false
 
     # Enable controlling SNAT IPs of Pod egress traffic.
-    #  Egress: false
+      Egress: true
 
     # Name of the OpenVSwitch bridge antrea-agent will create and use.
     # Make sure it doesn't conflict with your existing OpenVSwitch bridges.
@@ -1560,7 +1560,7 @@ data:
     #  NetworkPolicyStats: false
 
     # Enable controlling SNAT IPs of Pod egress traffic.
-    #  Egress: false
+      Egress: true
 
     # The port for the antrea-controller APIServer to serve on.
     # Note that if it's set to another value, the `containerPort` of the `api` port of the
@@ -1592,7 +1592,7 @@ metadata:
   annotations: {}
   labels:
     app: antrea
-  name: antrea-config-g45k8dcmg8
+  name: antrea-config-88d48gbc2m
   namespace: kube-system
 ---
 apiVersion: v1
@@ -1642,7 +1642,7 @@ spec:
         - --alsologtostderr
         - --log_file_max_size=100
         - --log_file_max_num=4
-        - --v=0
+        - --v=5
         command:
         - antrea-controller
         env:
@@ -1702,6 +1702,7 @@ spec:
           name: host-var-log-antrea
       hostNetwork: true
       nodeSelector:
+        kubernetes.io/hostname: k8s01
         kubernetes.io/os: linux
       priorityClassName: system-cluster-critical
       serviceAccountName: antrea-controller
@@ -1712,7 +1713,7 @@ spec:
         key: node-role.kubernetes.io/master
       volumes:
       - configMap:
-          name: antrea-config-g45k8dcmg8
+          name: antrea-config-88d48gbc2m
         name: antrea-config
       - name: antrea-controller-tls
         secret:
@@ -1827,7 +1828,7 @@ spec:
         - --alsologtostderr
         - --log_file_max_size=100
         - --log_file_max_num=4
-        - --v=0
+        - --v=5
         command:
         - antrea-agent
         env:
@@ -1979,7 +1980,7 @@ spec:
           path: /home/kubernetes/bin
         name: host-cni-bin
       - configMap:
-          name: antrea-config-g45k8dcmg8
+          name: antrea-config-88d48gbc2m
         name: antrea-config
       - hostPath:
           path: /etc/cni/net.d
