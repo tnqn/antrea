@@ -138,9 +138,9 @@ func setupTest(tb testing.TB) (*TestData, error) {
 		return nil, err
 	}
 	tb.Logf("Creating '%s' K8s Namespace", testNamespace)
-	if err := ensureAntreaRunning(tb, testData); err != nil {
-		return nil, err
-	}
+	//if err := ensureAntreaRunning(tb, testData); err != nil {
+	//	return nil, err
+	//}
 	if err := testData.createTestNamespace(); err != nil {
 		return nil, err
 	}

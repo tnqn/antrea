@@ -3,7 +3,6 @@ package egress
 import (
 	"context"
 	"github.com/vmware-tanzu/antrea/pkg/agent/route"
-	"k8s.io/apimachinery/pkg/labels"
 	"net"
 	"reflect"
 	"time"
@@ -197,9 +196,7 @@ func (c *Controller) syncEgress(egressName string) error {
 	// The work queue guarantees that concurrent goroutines cannot call syncNodeRoute on the
 	// same Node, which is required by the InstallNodeFlows / UninstallNodeFlows OF Client
 	// methods.
-
-	egresses, err := c.egressPolicyLister.List(labels.Everything())
-	egress := egresses[0]
+	egress, err := c.egressPolicyLister.Get(egressName)
 	if err != nil {
 		if !errors.IsNotFound(err) {
 			return err
@@ -320,10 +317,13 @@ loop:
 			}
 			switch event.Type {
 			case watch.Added:
-				//if err := w.AddFunc(event.Object); err != nil {
-				//	klog.Errorf("Failed to handle added event: %v", err)
-				//	return
-				//}
+				egressGroup := event.Object.(*v1beta.EgressGroup)
+				groupMemberSet := v1beta.NewGroupMemberSet()
+				for i := range egressGroup.GroupMembers {
+					groupMemberSet.Insert(&egressGroup.GroupMembers[i])
+				}
+				c.egressGroups[egressGroup.Name] = groupMemberSet
+				c.queue.Add(egressGroup.Name)
 				klog.V(2).Infof("Added EgressGroup (%#v)", event.Object)
 			case watch.Modified:
 				//if err := w.UpdateFunc(event.Object); err != nil {
@@ -332,10 +332,9 @@ loop:
 				//}
 				klog.V(2).Infof("Updated EgressGroup (%#v)", event.Object)
 			case watch.Deleted:
-				//if err := w.DeleteFunc(event.Object); err != nil {
-				//	klog.Errorf("Failed to handle deleted event: %v", err)
-				//	return
-				//}
+				egressGroup := event.Object.(*v1beta.EgressGroup)
+				delete(c.egressGroups, egressGroup.Name)
+				c.queue.Add(egressGroup.Name)
 				klog.V(2).Infof("Removed EgressGroup (%#v)", event.Object)
 			default:
 				klog.Errorf("Unknown event: %v", event)
