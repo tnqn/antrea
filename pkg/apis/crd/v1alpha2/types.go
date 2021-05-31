@@ -210,6 +210,11 @@ type EgressSpec struct {
 	AppliedTo AppliedTo `json:"appliedTo"`
 	// EgressIP specifies the SNAT IP address for the selected workloads.
 	EgressIP string `json:"egressIP"`
+	// ExternalIPPool specifies the IP Pool that the EgressIP should be allocated from.
+	// If it's set, the allocated EgressIP will be assigned to a Node specified by the Pool and failover to another Node
+	// if the assigned Node becomes unavailable.
+	// If it's set with EgressIP, the EgressIP must be in the IP Pool.
+	ExternalIPPool string `json:"externalIPPool"`
 }
 
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
@@ -220,4 +225,52 @@ type EgressList struct {
 	metav1.ListMeta `json:"metadata,omitempty"`
 
 	Items []Egress `json:"items"`
+}
+
+// +genclient
+// +genclient:nonNamespaced
+// +genclient:noStatus
+// +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
+
+// ExternalIPPool defines one or multiple IP sets that can be used in external network. For instance, the IPs can be
+// allocated to the Egress resources as the Egress IPs.
+type ExternalIPPool struct {
+	metav1.TypeMeta `json:",inline"`
+	// Standard metadata of the object.
+	metav1.ObjectMeta `json:"metadata,omitempty"`
+
+	// Specification of the ExternalIPPool.
+	Spec ExternalIPPoolSpec `json:"spec"`
+}
+
+type ExternalIPPoolSpec struct {
+	// The IP sets of this IP pool, e.g. 10.10.0.0/24, 10.10.10.2-10.10.10.20, 10.10.10.30-10.10.10.30.
+	IPSets []IPSet `json:"ipSets"`
+	// The Nodes that the external IPs can be assigned to. If empty, it means all Nodes.
+	NodeSelector *metav1.LabelSelector `json:"nodeSelector"`
+}
+
+// IPSet is a set of contiguous IP addresses, represented by a CIDR or an IP range.
+type IPSet struct {
+	// The CIDR of this IP set, e.g. 10.10.10.0/24. Cannot be set with IPRange.
+	CIDR    string   `json:"cidr"`
+	// The IP range of this IP set, e.g. 10.10.10.5-10.10.11.100. Cannot be set with CIDR.
+	IPRange *IPRange `json:"ipRange"`
+}
+
+type IPRange struct {
+	// The start IP of the range, inclusive.
+	Start string `json:"start"`
+	// The end IP of the range, inclusive.
+	End   string `json:"end"`
+}
+
+// +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
+
+type ExternalIPPoolList struct {
+	metav1.TypeMeta `json:",inline"`
+	// +optional
+	metav1.ListMeta `json:"metadata,omitempty"`
+
+	Items []ExternalIPPool `json:"items"`
 }

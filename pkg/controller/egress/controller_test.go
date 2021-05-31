@@ -106,7 +106,7 @@ func newController(objects ...runtime.Object) *egressController {
 		informerFactory.Core().V1().Pods(),
 		informerFactory.Core().V1().Namespaces(),
 		crdInformerFactory.Crd().V1alpha2().ExternalEntities())
-	controller := NewEgressController(groupEntityIndex, egressInformer, egressGroupStore)
+	controller := NewEgressController(crdClient, groupEntityIndex, egressInformer, egressGroupStore)
 	return &egressController{
 		controller,
 		client,
