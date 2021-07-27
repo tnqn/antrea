@@ -1731,7 +1731,7 @@ func (c *client) conjunctionExceptionFlow(conjunctionID uint32, tableID binding.
 }
 
 // conjunctiveMatchFlow generates the flow to set conjunctive actions if the match condition is matched.
-func (c *client) conjunctiveMatchFlow(tableID binding.TableIDType, matchKey *types.MatchKey, matchValue interface{}, priority *uint16, actions ...*conjunctiveAction) binding.Flow {
+func (c *client) conjunctiveMatchFlow(tableID binding.TableIDType, matchKey *types.MatchKey, matchValue interface{}, priority *uint16, actions []*conjunctiveAction) binding.Flow {
 	var ofPriority uint16
 	if priority != nil {
 		ofPriority = *priority

@@ -623,7 +623,7 @@ func checkFlowCount(t *testing.T, expectCount int) {
 }
 
 func checkConjMatchFlowActions(t *testing.T, client *client, c *clause, address types.Address, addressType types.AddressType, actionCount int, anyDropRuleCount int) {
-	addrMatch := c.generateAddressConjMatch(address, addressType, nil)
+	addrMatch := generateAddressConjMatch(c.ruleTable.GetID(), address, addressType, nil)
 	context, found := client.globalConjMatchFlowCache[addrMatch.generateGlobalMapKey()]
 	require.True(t, found, "Failed to add conjunctive match flow to global cache")
 	assert.Equal(t, actionCount, len(context.actions), fmt.Sprintf("Incorrect policyRuleConjunction action number, expect: %d, actual: %d", actionCount, len(context.actions)))
