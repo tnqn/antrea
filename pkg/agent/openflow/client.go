@@ -313,6 +313,41 @@ func (c *client) addFlows(cache *flowCategoryCache, flowCacheKey string, flows [
 	return nil
 }
 
+// addFlows installs the flows on the OVS bridge and then add them into the flow cache. If the flow cache exists,
+// it will return immediately, otherwise it will use Bundle to add all flows, and then add them into the flow cache.
+// If it fails to add the flows with Bundle, it will return the error and no flow cache is created.
+func (c *client) addFlowsWithMultipleKeys(cache *flowCategoryCache, keyToFlows map[string][]binding.Flow) error {
+	var allFlows []binding.Flow
+	flowCacheMap := map[string]flowCache{}
+	for flowCacheKey, flows := range keyToFlows {
+		_, ok := cache.Load(flowCacheKey)
+		// If a flow cache entry already exists for the key, return immediately. Otherwise, add the flows to the switch
+		// and populate the cache with them.
+		if ok {
+			klog.V(2).Infof("Flows with cache key %s are already installed", flowCacheKey)
+			continue
+		}
+		fCache := flowCache{}
+		for _, flow := range flows {
+			allFlows = append(allFlows, flow)
+			fCache[flow.MatchString()] = flow
+		}
+		flowCacheMap[flowCacheKey] = fCache
+	}
+	if len(allFlows) == 0 {
+		return nil
+	}
+	err := c.ofEntryOperations.AddAll(allFlows)
+	if err != nil {
+		return err
+	}
+	// Add the successfully installed flows into the flow cache.
+	for flowCacheKey, flowCache := range flowCacheMap {
+		cache.Store(flowCacheKey, flowCache)
+	}
+	return nil
+}
+
 // modifyFlows sets the flows of flowCategoryCache be exactly same as the provided slice for the given flowCacheKey.
 func (c *client) modifyFlows(cache *flowCategoryCache, flowCacheKey string, flows []binding.Flow) error {
 	oldFlowCacheI, ok := cache.Load(flowCacheKey)
@@ -509,6 +544,7 @@ func (c *client) InstallEndpointFlows(protocol binding.Protocol, endpoints []pro
 	c.replayMutex.RLock()
 	defer c.replayMutex.RUnlock()
 
+	keyToFlows := map[string][]binding.Flow{}
 	for _, endpoint := range endpoints {
 		var flows []binding.Flow
 		endpointPort, _ := endpoint.Port()
@@ -519,11 +555,10 @@ func (c *client) InstallEndpointFlows(protocol binding.Protocol, endpoints []pro
 		if endpoint.GetIsLocal() {
 			flows = append(flows, c.hairpinSNATFlow(endpointIP))
 		}
-		if err := c.addFlows(c.serviceFlowCache, cacheKey, flows); err != nil {
-			return err
-		}
+		keyToFlows[cacheKey] = flows
 	}
-	return nil
+
+	return c.addFlowsWithMultipleKeys(c.serviceFlowCache, keyToFlows)
 }
 
 func (c *client) UninstallEndpointFlows(protocol binding.Protocol, endpoint proxy.Endpoint) error {
