@@ -25,6 +25,7 @@ Kubernetes: `>= 1.16.0-0`
 | agent.antreaAgent.logFileMaxNum | int | `4` | Max number of log files. |
 | agent.antreaAgent.logFileMaxSize | int | `100` | Max size in MBs of any single log file. |
 | agent.antreaAgent.resources | object | `{"requests":{"cpu":"200m"}}` | Resource requests and limits for the antrea-agent container. |
+| agent.antreaAgentTweaker.resources | object | `{"requests":{"cpu":"100m"}}` | Resource requests and limits for the antrea-agent-tweaker container. |
 | agent.antreaIPsec.resources | object | `{"requests":{"cpu":"50m"}}` | Resource requests and limits for the antrea-ipsec container (when IPsec is enabled). |
 | agent.antreaOVS.extraArgs | list | `[]` | Extra command-line arguments for antrea-ovs. |
 | agent.antreaOVS.logFileMaxNum | int | `4` | Max number of log files. |
@@ -41,6 +42,8 @@ Kubernetes: `>= 1.16.0-0`
 | agent.priorityClassName | string | `"system-node-critical"` | Prority class to use for the antrea-agent Pods. |
 | agent.tolerations | list | `[{"key":"CriticalAddonsOnly","operator":"Exists"},{"effect":"NoSchedule","operator":"Exists"},{"effect":"NoExecute","operator":"Exists"}]` | Tolerations for the antrea-agent Pods. |
 | agent.updateStrategy | object | `{"type":"RollingUpdate"}` | Update strategy for the antrea-agent DaemonSet. |
+| antreaAgentTweaker.disableUdpTunnelOffload | bool | `false` | Disable UDP tunnel offload on the transport interface. |
+| antreaAgentTweaker.enable | bool | `false` | Inject antreaAgentTweaker init-container to antrea-agent Daemonset and add related Configmaps. |
 | antreaProxy.nodePortAddresses | list | `[]` | String array of values which specifies the host IPv4/IPv6 addresses for NodePort. By default, all host addresses are used. |
 | antreaProxy.proxyAll | bool | `false` | Proxy all Service traffic, for all Service types, regardless of where it comes from. |
 | antreaProxy.proxyLoadBalancerIPs | bool | `true` | When set to false, AntreaProxy no longer load-balances traffic destined to the External IPs of LoadBalancer Services. |

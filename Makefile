@@ -87,6 +87,12 @@ antrea-agent-instr-binary:
 	@mkdir -p $(BINDIR)
 	GOOS=linux $(GO) test -tags testbincover -covermode count -coverpkg=antrea.io/antrea/pkg/... -c -o $(BINDIR)/antrea-agent-coverage $(GOFLAGS) -ldflags '$(LDFLAGS)' antrea.io/antrea/cmd/antrea-agent
 
+
+.PHONY: antrea-agent-tweaker
+antrea-agent-tweaker:
+	@mkdir -p $(BINDIR)
+	GOOS=linux $(GO) build -o $(BINDIR) $(GOFLAGS) -ldflags '$(LDFLAGS)' antrea.io/antrea/cmd/antrea-agent-tweaker
+
 .PHONY: antrea-controller
 antrea-controller:
 	@mkdir -p $(BINDIR)
