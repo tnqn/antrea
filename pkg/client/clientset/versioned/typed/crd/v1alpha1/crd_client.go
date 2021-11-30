@@ -28,6 +28,7 @@ type CrdV1alpha1Interface interface {
 	NetworkPoliciesGetter
 	TiersGetter
 	TraceflowsGetter
+	TrafficControlConfigurationsGetter
 }
 
 // CrdV1alpha1Client is used to interact with features provided by the crd.antrea.io group.
@@ -49,6 +50,10 @@ func (c *CrdV1alpha1Client) Tiers() TierInterface {
 
 func (c *CrdV1alpha1Client) Traceflows() TraceflowInterface {
 	return newTraceflows(c)
+}
+
+func (c *CrdV1alpha1Client) TrafficControlConfigurations() TrafficControlConfigurationInterface {
+	return newTrafficControlConfigurations(c)
 }
 
 // NewForConfig creates a new CrdV1alpha1Client for the given config.

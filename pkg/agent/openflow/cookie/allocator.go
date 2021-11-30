@@ -37,6 +37,7 @@ const (
 	Egress
 	Multicast
 	Traceflow
+	TrafficControl
 )
 
 func (c Category) String() string {

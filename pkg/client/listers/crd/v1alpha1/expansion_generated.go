@@ -35,3 +35,7 @@ type TierListerExpansion interface{}
 // TraceflowListerExpansion allows custom methods to be added to
 // TraceflowLister.
 type TraceflowListerExpansion interface{}
+
+// TrafficControlConfigurationListerExpansion allows custom methods to be added to
+// TrafficControlConfigurationLister.
+type TrafficControlConfigurationListerExpansion interface{}

@@ -600,3 +600,138 @@ type NamespacedName struct {
 	Name      string `json:"name,omitempty"`
 	Namespace string `json:"namespace,omitempty"`
 }
+
+type Direction string
+
+const (
+	DirectionIn  Direction = "In"
+	DirectionOut Direction = "Out"
+	DirectionBoth Direction = "Both"
+)
+
+type Action string
+
+const (
+	ActionRedirect Action = "Redirect"
+)
+
+// +genclient
+// +genclient:nonNamespaced
+// +genclient:noStatus
+// +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
+
+type TrafficControlConfiguration struct {
+	metav1.TypeMeta `json:",inline"`
+	// Standard metadata of the object.
+	metav1.ObjectMeta `json:"metadata,omitempty"`
+
+	// Specification of the desired behavior of Tier.
+	Rules []TrafficControlRule `json:"rules"`
+}
+
+// TrafficControlRule describes an admission webhook and the resources and operations it applies to.
+type TrafficControlRule struct {
+	// The name of the admission webhook.
+	// Name should be fully qualified, e.g., imagepolicy.kubernetes.io, where
+	// "imagepolicy" is the name of the webhook, and kubernetes.io is the name
+	// of the organization.
+	// Required.
+	Name string `json:"name" protobuf:"bytes,1,opt,name=name"`
+
+	// Default to the empty LabelSelector, which matches everything.
+	// +optional
+	NamespaceSelector *metav1.LabelSelector `json:"namespaceSelector,omitempty" protobuf:"bytes,2,opt,name=namespaceSelector"`
+
+	// +optional
+	PodSelector *metav1.LabelSelector `json:"podSelector,omitempty" protobuf:"bytes,3,opt,name=podSelector"`
+
+	Direction Direction `json:"direction,omitempty" protobuf:"bytes,4,opt,name=direction"`
+
+	Action Action `json:"action,omitempty" protobuf:"bytes,5,opt,name=action"`
+
+	Device string `json:"device,omitempty" protobuf:"bytes,6,opt,name=device"`
+}
+
+// +genclient
+// +genclient:nonNamespaced
+// +genclient:noStatus
+// +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
+
+type TrafficControl struct {
+	metav1.TypeMeta `json:",inline"`
+	// Standard metadata of the object.
+	metav1.ObjectMeta `json:"metadata,omitempty"`
+
+	// Specification of the desired behavior of TrafficControl.
+	Spec TrafficControlSpec `json:"spec"`
+}
+
+type TrafficControlSpec struct {
+	// Default to the empty LabelSelector, which matches everything.
+	// +optional
+	NamespaceSelector *metav1.LabelSelector `json:"namespaceSelector,omitempty" protobuf:"bytes,1,opt,name=namespaceSelector"`
+
+	// Default to the empty LabelSelector, which matches everything.
+	// +optional
+	PodSelector *metav1.LabelSelector `json:"podSelector,omitempty" protobuf:"bytes,2,opt,name=podSelector"`
+
+	// The direction of traffic that should be matched. It can be In, Out, or Both.
+	Direction Direction `json:"direction,omitempty" protobuf:"bytes,3,opt,name=direction"`
+
+	// The action that should be taken for the traffic. It can be Redirect or Mirror.
+	Action Action `json:"action,omitempty" protobuf:"bytes,4,opt,name=action"`
+
+	// The target device that the traffic should be redirected or mirrored to.
+	Destination TrafficDestination `json:"destination,omitempty" protobuf:"bytes,5,opt,name=destination"`
+}
+
+type TrafficDestination struct {
+	// The name of the traffic destination, used to identify the port name in OVS.
+	Name string
+	// Port represents a port that is attached to the OVS bridge.
+	// It can be an OVS internal port, a physical NIC, or a veth device.
+	// +optional
+	Port *PortTrafficDestination
+	// Tunnel represents a tunnel that is created on the Node.
+	// It can be of type VXLAN, GENEVE, or GRE.
+	// +optional
+	Tunnel *TunnelTrafficDestination
+}
+
+// PortTrafficDestination represents a port that is attached to the OVS bridge.
+// It can be an OVS internal port, a physical NIC, or a veth device.
+type PortTrafficDestination struct {
+	// Internal represents whether this is an OVS internal port.
+	// Antrea will create the port if it's internal and missing. Otherwise the port must already exist.
+	Internal bool
+	// PeerName represents the name of the peer device from which the traffic will be sent back to OVS.
+	// It should only be set for Redirect action.
+	PeerName string
+}
+
+type TunnelType string
+
+const (
+	TunnelTypeVXLAN TunnelType = "vxlan"
+	TunnelTypeGENEVE TunnelType = "geneve"
+	TunnelTypeGRE TunnelType = "gre"
+)
+
+// TunnelTrafficDestination represents a tunnel that is created on the Node.
+// It can be of type VXLAN, GENEVE, or GRE.
+type TunnelTrafficDestination struct {
+	// The type of the tunnel.
+	Type TunnelType
+	// The remote IP of the tunnel.
+	RemoteIP string
+}
+
+// +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
+
+type TrafficControlConfigurationList struct {
+	metav1.TypeMeta `json:",inline"`
+	// +optional
+	metav1.ListMeta `json:"metadata,omitempty"`
+
+	Items []TrafficControlConfiguration `json:"items"`
+}

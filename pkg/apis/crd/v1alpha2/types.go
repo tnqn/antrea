@@ -379,3 +379,97 @@ type IPPoolList struct {
 
 	Items []IPPool `json:"items"`
 }
+
+type Direction string
+
+const (
+	DirectionIn  Direction = "In"
+	DirectionOut Direction = "Out"
+	DirectionBoth Direction = "Both"
+)
+
+type Action string
+
+const (
+	ActionRedirect Action = "Redirect"
+	ActionMirror Action = "Mirror"
+)
+
+type TunnelType string
+
+const (
+	TunnelTypeVXLAN TunnelType = "vxlan"
+	TunnelTypeGENEVE TunnelType = "geneve"
+	TunnelTypeGRE TunnelType = "gre"
+)
+
+// +genclient
+// +genclient:nonNamespaced
+// +genclient:noStatus
+// +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
+
+type TrafficControl struct {
+	metav1.TypeMeta `json:",inline"`
+	// Standard metadata of the object.
+	metav1.ObjectMeta `json:"metadata,omitempty"`
+
+	// Specification of the desired behavior of TrafficControl.
+	Spec TrafficControlSpec `json:"spec"`
+}
+
+type TrafficControlSpec struct {
+	// AppliedTo selects Pods to which the traffic control configuration will be applied.
+	AppliedTo AppliedTo `json:"appliedTo"`
+
+	// The direction of traffic that should be matched. It can be In, Out, or Both.
+	Direction Direction `json:"direction,omitempty"`
+
+	// The action that should be taken for the traffic. It can be Redirect or Mirror.
+	Action Action `json:"action,omitempty"`
+
+	// The destination that the traffic should be redirected or mirrored to.
+	Destination TrafficDestination `json:"destination,omitempty"`
+}
+
+type TrafficDestination struct {
+	// The name of the traffic destination, used to identify the port name in OVS.
+	Name string
+	// Port represents a port that is attached to the OVS bridge.
+	// It can be an OVS internal port, a physical NIC, or a veth device.
+	// +optional
+	Port *PortTrafficDestination
+	// Tunnel represents a tunnel that is created on the Node.
+	// It can be of type VXLAN, GENEVE, or GRE.
+	// +optional
+	Tunnel *TunnelTrafficDestination
+}
+
+// PortTrafficDestination represents a port that is attached to the OVS bridge.
+// It can be an OVS internal port, a physical NIC, or a veth device.
+type PortTrafficDestination struct {
+	// Internal represents whether this is an OVS internal port.
+	// Antrea will create the port if it's internal and missing. Otherwise the port must already exist.
+	Internal bool
+	// PeerName represents the name of the peer device from which the traffic will be sent back to OVS.
+	// It should only be set for Redirect action.
+	PeerName string
+}
+
+// TunnelTrafficDestination represents a tunnel that is created on the Node.
+// It can be of type VXLAN, GENEVE, or GRE.
+type TunnelTrafficDestination struct {
+	// The type of the tunnel.
+	Type TunnelType
+	// The remote IP of the tunnel.
+	RemoteIP string
+}
+
+// +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
+
+type TrafficControlList struct {
+	metav1.TypeMeta `json:",inline"`
+	// +optional
+	metav1.ListMeta `json:"metadata,omitempty"`
+
+	Items []TrafficControl `json:"items"`
+}

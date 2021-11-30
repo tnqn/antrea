@@ -30,6 +30,8 @@ type Interface interface {
 	Tiers() TierInformer
 	// Traceflows returns a TraceflowInformer.
 	Traceflows() TraceflowInformer
+	// TrafficControlConfigurations returns a TrafficControlConfigurationInformer.
+	TrafficControlConfigurations() TrafficControlConfigurationInformer
 }
 
 type version struct {
@@ -61,4 +63,9 @@ func (v *version) Tiers() TierInformer {
 // Traceflows returns a TraceflowInformer.
 func (v *version) Traceflows() TraceflowInformer {
 	return &traceflowInformer{factory: v.factory, tweakListOptions: v.tweakListOptions}
+}
+
+// TrafficControlConfigurations returns a TrafficControlConfigurationInformer.
+func (v *version) TrafficControlConfigurations() TrafficControlConfigurationInformer {
+	return &trafficControlConfigurationInformer{factory: v.factory, tweakListOptions: v.tweakListOptions}
 }

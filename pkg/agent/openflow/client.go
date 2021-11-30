@@ -15,6 +15,7 @@
 package openflow
 
 import (
+	"antrea.io/antrea/pkg/apis/crd/v1alpha1"
 	"fmt"
 	"math/rand"
 	"net"
@@ -301,6 +302,10 @@ type Client interface {
 		dstIP net.IP,
 		outPort uint32,
 		igmp ofutil.Message) error
+
+	InstallTrafficControlRule(name string, srcOfPorts []uint32, direction v1alpha1.Direction, action v1alpha1.Action, dstOfPort uint32) error
+
+	UninstallTrafficControlRule(name string) error
 }
 
 // GetFlowTableStatus returns an array of flow table status.

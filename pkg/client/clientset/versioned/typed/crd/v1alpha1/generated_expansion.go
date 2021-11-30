@@ -23,3 +23,5 @@ type NetworkPolicyExpansion interface{}
 type TierExpansion interface{}
 
 type TraceflowExpansion interface{}
+
+type TrafficControlConfigurationExpansion interface{}
