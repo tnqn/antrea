@@ -939,21 +939,21 @@ func (data *TestData) waitForAntreaDaemonSetPods(timeout time.Duration) error {
 		currentNumAvailable := dsLinux.Status.NumberAvailable
 		UpdatedNumberScheduled := dsLinux.Status.UpdatedNumberScheduled
 
-		if len(clusterInfo.windowsNodes) != 0 {
-			var dsWindows *appsv1.DaemonSet
-			if dsWindows, err = getDS(antreaWindowsDaemonSet, "Windows"); err != nil {
-				return false, err
-			}
-			currentNumAvailable += dsWindows.Status.NumberAvailable
-			UpdatedNumberScheduled += dsWindows.Status.UpdatedNumberScheduled
-		}
+		//if len(clusterInfo.windowsNodes) != 0 {
+		//	var dsWindows *appsv1.DaemonSet
+		//	if dsWindows, err = getDS(antreaWindowsDaemonSet, "Windows"); err != nil {
+		//		return false, err
+		//	}
+		//	currentNumAvailable += dsWindows.Status.NumberAvailable
+		//	UpdatedNumberScheduled += dsWindows.Status.UpdatedNumberScheduled
+		//}
 
 		// Make sure that all Daemon Pods are available.
 		// We use clusterInfo.numNodes instead of DesiredNumberScheduled because
 		// DesiredNumberScheduled may not be updated right away. If it is still set to 0 the
 		// first time we get the DaemonSet's Status, we would return immediately instead of
 		// waiting.
-		desiredNumber := int32(clusterInfo.numNodes)
+		desiredNumber := int32(clusterInfo.numNodes - len(clusterInfo.windowsNodes))
 		if currentNumAvailable != desiredNumber || UpdatedNumberScheduled != desiredNumber {
 			return false, nil
 		}
@@ -968,7 +968,7 @@ func (data *TestData) waitForAntreaDaemonSetPods(timeout time.Duration) error {
 		if err != nil {
 			return false, fmt.Errorf("failed to list antrea-agent Pods: %v", err)
 		}
-		if len(pods.Items) != clusterInfo.numNodes {
+		if len(pods.Items) != (clusterInfo.numNodes - len(clusterInfo.windowsNodes)) {
 			return false, nil
 		}
 		for _, pod := range pods.Items {
