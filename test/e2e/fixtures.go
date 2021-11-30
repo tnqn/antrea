@@ -179,6 +179,24 @@ func skipIfProxyAllDisabled(t *testing.T, data *TestData) {
 	}
 }
 
+func skipIfMissingManifest(tb testing.TB, data *TestData, manifestName string) {
+	nodeName := controlPlaneNodeName()
+	cmd := fmt.Sprintf("bash -c 'if [ -e %s ]; then echo exist; else echo not exist; fi'", manifestName)
+	rc, stdout, stderr, err := data.RunCommandOnNode(nodeName, cmd)
+	if err != nil {
+		tb.Fatalf("Failed to detect if %s exist on node: %v", manifestName, err)
+	}
+	if rc != 0 {
+		tb.Fatalf("Failed to detect if %s exist on node. - stdout: %s - stderr: %s", manifestName, stdout, stderr)
+	}
+	out := strings.TrimSpace(stdout)
+	if out == "exist" {
+		tb.Logf("Found %s on Node '%s'", manifestName, nodeName)
+	} else {
+		tb.Skipf("Skipping test because %s is not found on node %s", manifestName, nodeName)
+	}
+}
+
 func ensureAntreaRunning(data *TestData) error {
 	log.Println("Applying Antrea YAML")
 	if err := data.deployAntrea(deployAntreaDefault); err != nil {
@@ -243,6 +261,7 @@ func setupTestForFlowAggregator(tb testing.TB) (*TestData, bool, bool, error) {
 	if err != nil {
 		return testData, v4Enabled, v6Enabled, err
 	}
+	skipIfMissingManifest(tb, testData, flowAggregatorYML)
 	// Create pod using ipfix collector image
 	if err := NewPodBuilder("ipfix-collector", testData.testNamespace, ipfixCollectorImage).InHostNetwork().Create(testData); err != nil {
 		tb.Errorf("Error when creating the ipfix collector Pod: %v", err)
