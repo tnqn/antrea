@@ -37,7 +37,15 @@ import (
 	"antrea.io/antrea/pkg/features"
 )
 
-const waitEgressRealizedTimeout = 3 * time.Second
+const (
+	egressRealizedTimeout = 5 * time.Second
+	// When controller and agent restarted, agent may fail to start watch for EgressGroup,
+	// because antrea service is still not reachable for the agent.
+	// Thus agent wait another 5 second and try to start watch for EgressGroup again.
+	// pkg/agent/controller/egress/egress_controller.go-wait.NonSlidingUntil(c.watchEgressGroup, 5*time.Second, stopCh)
+	// See https://github.com/antrea-io/antrea/issues/2945
+	egressIPRealizedTimeout = 10 * time.Second
+)
 
 func skipIfEgressDisabled(tb testing.TB) {
 	skipIfFeatureDisabled(tb, features.Egress, true, true)
@@ -57,12 +65,12 @@ func TestEgress(t *testing.T) {
 	// Egress works for encap mode only.
 	skipIfEncapModeIsNot(t, data, config.TrafficEncapModeEncap)
 
-	t.Run("testEgressClientIP", func(t *testing.T) { testEgressClientIP(t, data) })
 	t.Run("testEgressCRUD", func(t *testing.T) { testEgressCRUD(t, data) })
 	t.Run("testEgressUpdateEgressIP", func(t *testing.T) { testEgressUpdateEgressIP(t, data) })
 	t.Run("testEgressUpdateNodeSelector", func(t *testing.T) { testEgressUpdateNodeSelector(t, data) })
 	t.Run("testEgressNodeFailure", func(t *testing.T) { testEgressNodeFailure(t, data) })
 	t.Run("testCreateExternalIPPool", func(t *testing.T) { testCreateExternalIPPool(t, data) })
+	t.Run("testEgressClientIP", func(t *testing.T) { testEgressClientIP(t, data) })
 }
 
 func testCreateExternalIPPool(t *testing.T, data *TestData) {
@@ -165,7 +173,7 @@ ip netns exec %[1]s /agnhost netexec
 			assertClientIP := func(pod string, clientIPs ...string) {
 				var exeErr error
 				var stdout, stderr string
-				if err := wait.Poll(100*time.Millisecond, 5*time.Second, func() (done bool, err error) {
+				if err := wait.Poll(100*time.Millisecond, egressIPRealizedTimeout, func() (done bool, err error) {
 					stdout, stderr, exeErr = getClientIP(pod)
 					if exeErr != nil {
 						return false, nil
@@ -191,7 +199,7 @@ ip netns exec %[1]s /agnhost netexec
 			assertConnError := func(pod string) {
 				var exeErr error
 				var stdout, stderr string
-				if err := wait.Poll(100*time.Millisecond, 2*time.Second, func() (done bool, err error) {
+				if err := wait.Poll(100*time.Millisecond, egressRealizedTimeout, func() (done bool, err error) {
 					stdout, stderr, exeErr = getClientIP(pod)
 					if exeErr != nil {
 						return true, nil
@@ -220,7 +228,7 @@ ip netns exec %[1]s /agnhost netexec
 			assertClientIP(remotePod, egressNodeIP)
 
 			var err error
-			err = wait.Poll(time.Millisecond*100, time.Second, func() (bool, error) {
+			err = wait.Poll(time.Millisecond*100, egressRealizedTimeout, func() (bool, error) {
 				egress, err = data.crdClient.CrdV1alpha2().Egresses().Get(context.TODO(), egress.Name, metav1.GetOptions{})
 				if err != nil {
 					return false, err
@@ -370,7 +378,7 @@ func testEgressCRUD(t *testing.T, data *TestData) {
 			defer data.crdClient.CrdV1alpha2().Egresses().Delete(context.TODO(), egress.Name, metav1.DeleteOptions{})
 			// Use Poll to wait the interval before the first run to detect the case that the IP is assigned to any Node
 			// when it's not supposed to.
-			err := wait.Poll(500*time.Millisecond, 3*time.Second, func() (done bool, err error) {
+			err := wait.Poll(500*time.Millisecond, egressRealizedTimeout, func() (done bool, err error) {
 				egress, err = data.crdClient.CrdV1alpha2().Egresses().Get(context.TODO(), egress.Name, metav1.GetOptions{})
 				if err != nil {
 					return false, err
@@ -398,7 +406,7 @@ func testEgressCRUD(t *testing.T, data *TestData) {
 
 			checkEIPStatus := func(expectedUsed int) {
 				var gotUsed, gotTotal int
-				err := wait.PollImmediate(200*time.Millisecond, 2*time.Second, func() (done bool, err error) {
+				err := wait.PollImmediate(200*time.Millisecond, egressRealizedTimeout, func() (done bool, err error) {
 					pool, err := data.crdClient.CrdV1alpha2().ExternalIPPools().Get(context.TODO(), pool.Name, metav1.GetOptions{})
 					if err != nil {
 						return false, fmt.Errorf("failed to get ExternalIPPool: %v", err)
@@ -485,7 +493,7 @@ func testEgressUpdateEgressIP(t *testing.T, data *TestData) {
 
 			egress := data.createEgress(t, "egress-", nil, map[string]string{"foo": "bar"}, originalPool.Name, "")
 			defer data.crdClient.CrdV1alpha2().Egresses().Delete(context.TODO(), egress.Name, metav1.DeleteOptions{})
-			egress, err := data.checkEgressState(egress.Name, tt.originalEgressIP, tt.originalNode, "", time.Second)
+			egress, err := data.checkEgressState(egress.Name, tt.originalEgressIP, tt.originalNode, "", egressRealizedTimeout)
 			require.NoError(t, err)
 
 			// The Egress maybe has been modified.
@@ -501,7 +509,7 @@ func testEgressUpdateEgressIP(t *testing.T, data *TestData) {
 			})
 			require.NoError(t, err, "Failed to update Egress")
 
-			_, err = data.checkEgressState(egress.Name, tt.newEgressIP, tt.newNode, "", time.Second)
+			_, err = data.checkEgressState(egress.Name, tt.newEgressIP, tt.newNode, "", egressRealizedTimeout)
 			require.NoError(t, err)
 			err = wait.PollImmediate(200*time.Millisecond, timeout, func() (done bool, err error) {
 				exists, err := hasIP(data, tt.originalNode, tt.originalEgressIP)
@@ -563,7 +571,7 @@ func testEgressUpdateNodeSelector(t *testing.T, data *TestData) {
 			}
 			// Egress IP migration should happen fast when it's caused by nodeSelector update.
 			// No IP should be left on the evicted Node.
-			testEgressMigration(t, data, shrinkEgressNodes, restoreEgressNodes, true, time.Second, &tt.ipRange)
+			testEgressMigration(t, data, shrinkEgressNodes, restoreEgressNodes, true, egressRealizedTimeout, &tt.ipRange)
 		})
 	}
 }
@@ -752,7 +760,7 @@ func (data *TestData) createEgress(t *testing.T, generateName string, matchExpre
 }
 
 func (data *TestData) waitForEgressRealized(egress *v1alpha2.Egress) (*v1alpha2.Egress, error) {
-	err := wait.PollImmediate(200*time.Millisecond, waitEgressRealizedTimeout, func() (done bool, err error) {
+	err := wait.PollImmediate(200*time.Millisecond, egressRealizedTimeout, func() (done bool, err error) {
 		egress, err = data.crdClient.CrdV1alpha2().Egresses().Get(context.TODO(), egress.Name, metav1.GetOptions{})
 		if err != nil {
 			return false, err
