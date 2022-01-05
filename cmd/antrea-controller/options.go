@@ -161,10 +161,6 @@ func (o *Options) setDefaults() {
 		o.config.SelfSignedCert = new(bool)
 		*o.config.SelfSignedCert = true
 	}
-	if o.config.LegacyCRDMirroring == nil {
-		o.config.LegacyCRDMirroring = new(bool)
-		*o.config.LegacyCRDMirroring = true
-	}
 	if o.config.NodeIPAM.NodeCIDRMaskSizeIPv4 == 0 {
 		o.config.NodeIPAM.NodeCIDRMaskSizeIPv4 = ipamIPv4MaskDefault
 	}

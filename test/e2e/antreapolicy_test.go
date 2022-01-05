@@ -38,8 +38,6 @@ import (
 	crdv1alpha2 "antrea.io/antrea/pkg/apis/crd/v1alpha2"
 	crdv1alpha3 "antrea.io/antrea/pkg/apis/crd/v1alpha3"
 	"antrea.io/antrea/pkg/features"
-	legacycorev1a2 "antrea.io/antrea/pkg/legacyapis/core/v1alpha2"
-	legacysecv1alpha1 "antrea.io/antrea/pkg/legacyapis/security/v1alpha1"
 	. "antrea.io/antrea/test/e2e/utils"
 )
 
@@ -3010,14 +3008,6 @@ func waitForResourceReady(obj metav1.Object, timeout time.Duration) error {
 	defer timeCost()("ready")
 	if err = wait.Poll(100*time.Millisecond, timeout, func() (bool, error) {
 		switch p := obj.(type) {
-		case *legacysecv1alpha1.ClusterNetworkPolicy:
-			_, err = k8sUtils.GetACNP(p.Name)
-		case *legacysecv1alpha1.NetworkPolicy:
-			_, err = k8sUtils.GetANP(p.Namespace, p.Name)
-		case *legacysecv1alpha1.Tier:
-			_, err = k8sUtils.GetTier(p.Name)
-		case *legacycorev1a2.ClusterGroup:
-			_, err = k8sUtils.GetV1Alpha2CG(p.Name)
 		case *crdv1alpha1.ClusterNetworkPolicy:
 			_, err = k8sUtils.GetACNP(p.Name)
 		case *crdv1alpha1.NetworkPolicy:

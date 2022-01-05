@@ -63,8 +63,6 @@ type ControllerConfig struct {
 	TLSCipherSuites string `yaml:"tlsCipherSuites,omitempty"`
 	// TLS min version.
 	TLSMinVersion string `yaml:"tlsMinVersion,omitempty"`
-	// Legacy CRD mirroring.
-	LegacyCRDMirroring *bool `yaml:"legacyCRDMirroring,omitempty"`
 	// NodeIPAM Configuration
 	NodeIPAM NodeIPAMConfig `yaml:"nodeIPAM"`
 }

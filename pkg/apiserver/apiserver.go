@@ -28,6 +28,7 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/klog/v2"
 	"k8s.io/kube-aggregator/pkg/client/clientset_generated/clientset"
+	apiextensionclientset "k8s.io/apiextensions-apiserver/pkg/client/clientset/clientset"
 
 	"antrea.io/antrea/pkg/apis/controlplane"
 	cpinstall "antrea.io/antrea/pkg/apis/controlplane/install"
@@ -60,12 +61,6 @@ import (
 	"antrea.io/antrea/pkg/controller/querier"
 	"antrea.io/antrea/pkg/controller/stats"
 	"antrea.io/antrea/pkg/features"
-	legacycontrolplane "antrea.io/antrea/pkg/legacyapis/controlplane"
-	legacycpinstall "antrea.io/antrea/pkg/legacyapis/controlplane/install"
-	legacyapistats "antrea.io/antrea/pkg/legacyapis/stats"
-	legacystatsinstall "antrea.io/antrea/pkg/legacyapis/stats/install"
-	legacysysteminstall "antrea.io/antrea/pkg/legacyapis/system/install"
-	legacysystem "antrea.io/antrea/pkg/legacyapis/system/v1beta1"
 )
 
 var (
@@ -82,10 +77,6 @@ func init() {
 	cpinstall.Install(Scheme)
 	systeminstall.Install(Scheme)
 	statsinstall.Install(Scheme)
-
-	legacycpinstall.Install(Scheme)
-	legacysysteminstall.Install(Scheme)
-	legacystatsinstall.Install(Scheme)
 
 	// We need to add the options to empty v1, see sample-apiserver/pkg/apiserver/apiserver.go.
 	metav1.AddToGroupVersion(Scheme, schema.GroupVersion{Version: "v1"})
@@ -207,27 +198,6 @@ func installAPIGroup(s *APIServer, c completedConfig) error {
 
 	groups := []*genericapiserver.APIGroupInfo{&cpGroup, &systemGroup, &statsGroup}
 
-	// legacy groups
-	legacyCPGroup := genericapiserver.NewDefaultAPIGroupInfo(legacycontrolplane.GroupName, Scheme, metav1.ParameterCodec, Codecs)
-	legacyCPv1beta2Storage := map[string]rest.Storage{}
-	legacyCPv1beta2Storage["addressgroups"] = addressGroupStorage
-	legacyCPv1beta2Storage["appliedtogroups"] = appliedToGroupStorage
-	legacyCPv1beta2Storage["networkpolicies"] = networkPolicyStorage
-	legacyCPv1beta2Storage["networkpolicies/status"] = networkPolicyStatusStorage
-	legacyCPv1beta2Storage["nodestatssummaries"] = nodeStatsSummaryStorage
-	legacyCPv1beta2Storage["groupassociations"] = groupAssociationStorage
-	legacyCPv1beta2Storage["clustergroupmembers"] = clusterGroupMembershipStorage
-	legacyCPGroup.VersionedResourcesStorageMap["v1beta2"] = legacyCPv1beta2Storage
-
-	legacySystemGroup := genericapiserver.NewDefaultAPIGroupInfo(legacysystem.GroupName, Scheme, metav1.ParameterCodec, Codecs)
-	legacySystemGroup.VersionedResourcesStorageMap["v1beta1"] = systemStorage
-
-	legacyStatsGroup := genericapiserver.NewDefaultAPIGroupInfo(legacyapistats.GroupName, Scheme, metav1.ParameterCodec, Codecs)
-	legacyStatsGroup.VersionedResourcesStorageMap["v1alpha1"] = statsStorage
-
-	// legacy API groups
-	groups = append(groups, &legacyCPGroup, &legacySystemGroup, &legacyStatsGroup)
-
 	for _, apiGroupInfo := range groups {
 		if err := s.GenericAPIServer.InstallAPIGroup(apiGroupInfo); err != nil {
 			return err
@@ -266,11 +236,65 @@ func CleanupDeprecatedAPIServices(aggregatorClient clientset.Interface) error {
 	deprecatedAPIServices := []string{
 		"v1beta1.networking.antrea.tanzu.vmware.com",
 		"v1beta1.controlplane.antrea.tanzu.vmware.com",
+		"v1beta2.controlplane.antrea.tanzu.vmware.com",
+		"v1beta1.system.antrea.tanzu.vmware.com",
+		"v1alpha1.stats.antrea.tanzu.vmware.com",
 	}
 	for _, as := range deprecatedAPIServices {
 		err := aggregatorClient.ApiregistrationV1().APIServices().Delete(context.TODO(), as, metav1.DeleteOptions{})
 		if err == nil {
 			klog.Infof("Deleted the deprecated APIService %s", as)
+		} else if !apierrors.IsNotFound(err) {
+			return err
+		}
+	}
+	return nil
+}
+
+// CleanupDeprecatedWebhookConfigurations deletes the deprecated MutatingWebhookConfiguration and
+// ValidatingWebhookConfigurations resources.
+func CleanupDeprecatedWebhookConfigurations(k8sClient kubernetes.Interface) error {
+	deprecatedMutatingWebhookConfigurations := []string{
+		"crdmutator.antrea.tanzu.vmware.com",
+	}
+	deprecatedValidatingWebhookConfigurations := []string{
+		"crdvalidator.antrea.tanzu.vmware.com",
+	}
+	for _, cfg := range deprecatedMutatingWebhookConfigurations {
+		err := k8sClient.AdmissionregistrationV1().MutatingWebhookConfigurations().Delete(context.TODO(), cfg, metav1.DeleteOptions{})
+		if err == nil {
+			klog.Infof("Deleted the deprecated MutatingWebhookConfiguration %s", cfg)
+		} else if !apierrors.IsNotFound(err) {
+			return err
+		}
+	}
+	for _, cfg := range deprecatedValidatingWebhookConfigurations {
+		err := k8sClient.AdmissionregistrationV1().ValidatingWebhookConfigurations().Delete(context.TODO(), cfg, metav1.DeleteOptions{})
+		if err == nil {
+			klog.Infof("Deleted the deprecated ValidatingWebhookConfiguration %s", cfg)
+		} else if !apierrors.IsNotFound(err) {
+			return err
+		}
+	}
+	return nil
+}
+
+// CleanupDeprecatedCustomResourceDefinitions deletes the deprecated CustomResourceDefinition resources.
+func CleanupDeprecatedCustomResourceDefinitions(apiExtensionClient apiextensionclientset.Interface) error {
+	deprecatedCustomResourceDefinitions := []string{
+		"antreaagentinfos.clusterinformation.antrea.tanzu.vmware.com",
+		"antreacontrollerinfos.clusterinformation.antrea.tanzu.vmware.com",
+		"clustergroups.core.antrea.tanzu.vmware.com",
+		"clusternetworkpolicies.security.antrea.tanzu.vmware.com",
+		"networkpolicies.security.antrea.tanzu.vmware.com",
+		"tiers.security.antrea.tanzu.vmware.com",
+		"externalentities.core.antrea.tanzu.vmware.com",
+		"traceflows.ops.antrea.tanzu.vmware.com",
+	}
+	for _, crd := range deprecatedCustomResourceDefinitions {
+		err := apiExtensionClient.ApiextensionsV1().CustomResourceDefinitions().Delete(context.TODO(), crd, metav1.DeleteOptions{})
+		if err == nil {
+			klog.Infof("Deleted the deprecated CustomResourceDefinition %s", crd)
 		} else if !apierrors.IsNotFound(err) {
 			return err
 		}

@@ -74,7 +74,6 @@ IPSEC=false
 ALLFEATURES=false
 PROXY=true
 PROXY_ALL=false
-LEGACY_CRD=true
 ENDPOINTSLICE=false
 NP=true
 KEEP=false
@@ -128,10 +127,6 @@ case $key in
     --proxy-all)
     PROXY=true
     PROXY_ALL=true
-    shift
-    ;;
-    --no-legacy-crd)
-    LEGACY_CRD=false
     shift
     ;;
     --endpointslice)
@@ -328,10 +323,6 @@ fi
 
 if $PROXY_ALL; then
      sed -i.bak -E "s/^[[:space:]]*#proxyAll[[:space:]]*:[[:space:]]*[a-z]+[[:space:]]*$/  proxyAll: true/" antrea-agent.conf
-fi
-
-if ! $LEGACY_CRD; then
-    sed -i.bak -E "s/^#legacyCRDMirroring[[:space:]]*:[[:space:]]*[a-z]+[[:space:]]*$/legacyCRDMirroring: false/" antrea-controller.conf
 fi
 
 if $ENDPOINTSLICE; then
@@ -551,8 +542,8 @@ if $K8S_115; then
     $KUSTOMIZE edit add patch --path legacy/controller.json --kind ValidatingWebhookConfiguration
     # Patch for all CustomResourceDefinition
     $KUSTOMIZE edit add patch --path legacy/crdVersion.json --kind CustomResourceDefinition
-    $KUSTOMIZE edit add patch --path legacy/crdClusterInformation.json --kind CustomResourceDefinition --name antreaagentinfos.clusterinformation.antrea.tanzu.vmware.com
-    $KUSTOMIZE edit add patch --path legacy/crdClusterInformation.json --kind CustomResourceDefinition --name antreacontrollerinfos.clusterinformation.antrea.tanzu.vmware.com
+    $KUSTOMIZE edit add patch --path legacy/crdClusterInformation.json --kind CustomResourceDefinition --name antreaagentinfos.crd.antrea.io
+    $KUSTOMIZE edit add patch --path legacy/crdClusterInformation.json --kind CustomResourceDefinition --name antreacontrollerinfos.crd.antrea.io
     $KUSTOMIZE edit add patch --path legacy/crdTraceflow.json --kind CustomResourceDefinition --name traceflows.ops.antrea.tanzu.vmware.com
     $KUSTOMIZE edit add patch --path legacy/crdTier.json --kind CustomResourceDefinition --name tiers.security.antrea.tanzu.vmware.com
     $KUSTOMIZE edit add patch --path legacy/crdClusterNetworkPolicy.json --kind CustomResourceDefinition --name clusternetworkpolicies.security.antrea.tanzu.vmware.com
