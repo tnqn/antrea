@@ -508,10 +508,6 @@ func run(o *Options) error {
 		}
 	}
 
-	klog.InfoS("New line added by patch 1")
-
-	klog.InfoS("New line added by patch 2")
-
 	if features.DefaultFeatureGate.Enabled(features.Multicast) {
 		multicastSocket, err := multicast.CreateMulticastSocket()
 		if err != nil {
