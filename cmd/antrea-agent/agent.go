@@ -526,6 +526,8 @@ func run(o *Options) error {
 		go mcastController.Run(stopCh)
 	}
 
+	klog.InfoS("New line added by patch 3")
+
 	agentQuerier := querier.NewAgentQuerier(
 		nodeConfig,
 		networkConfig,
