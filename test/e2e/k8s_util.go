@@ -109,9 +109,9 @@ func (k *KubernetesUtils) probe(
 	}
 	log.Tracef("Running: kubectl exec %s -c %s -n %s -- %s", pod.Name, containerName, pod.Namespace, strings.Join(cmd, " "))
 	stdout, stderr, err := k.runCommandFromPod(pod.Namespace, pod.Name, containerName, cmd)
+	// log this error as trace since may be an expected failure
+	log.Infof("%s -> %s: error when running command: err - %v /// stdout - %s /// stderr - %s", podName, dstName, err, stdout, stderr)
 	if err != nil {
-		// log this error as trace since may be an expected failure
-		log.Tracef("%s -> %s: error when running command: err - %v /// stdout - %s /// stderr - %s", podName, dstName, err, stdout, stderr)
 		// If err != nil and stderr == "", then it means this probe failed because of
 		// the command instead of connectivity. For example, container name doesn't exist.
 		if stderr == "" {
