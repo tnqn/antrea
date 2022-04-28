@@ -5,9 +5,8 @@ This directory includes all the scripts required to run CI on Antrea.
 For information about our Jenkins CI jobs and how to run the same tests locally,
 see [here](jenkins/README.md).
 
-File [k8s-conformance-image-version](k8s-conformance-image-version) stores the
-version number of the K8s conformance container image we currently use to run
-tests.
+For K8s conformance upstream tests, the version of the K8s conformance container
+image will be determined at runtime according to the Kubernetes server's version.
 
 ## Antrea test suite
 
@@ -36,7 +35,7 @@ We run 4 different categories of tests as part of CI:
   components can be deployed successfully, check end-to-end connectivity for
   different types of traffic (e.g. Pod-to-Pod, Pod-to-Service), validate the
   implementation of Antrea-speicifc APIs
-  (e.g. [ClusterNetworkPolicy](/docs/network-policy.md),
+  (e.g. [ClusterNetworkPolicy](/docs/antrea-network-policy.md),
   [Traceflow](/docs/traceflow-guide.md), ...).
 * **Kubernetes upstream tests**: our CI relies on Kubernetes community tests to
   ensure conformance and validate the implementation of the NetworkPolicy API.
