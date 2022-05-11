@@ -21,7 +21,7 @@ function echoerr {
 }
 
 GKE_ZONE="us-west1-a"
-GKE_HOST="UBUNTU"
+GKE_HOST="UBUNTU_CONTAINERD"
 MACHINE_TYPE="e2-standard-4"
 GKE_SERVICE_CIDR="10.94.0.0/16"
 GKE_PROJECT="antrea"
