@@ -25,10 +25,12 @@ function echoerr {
 
 _usage="Usage: $0 [--pull] [--push] [--platform <PLATFORM>] [--distro [ubuntu|ubi]]
 Build the antrea openvswitch image.
-        --pull                  Always attempt to pull a newer version of the base images
-        --push                  Push the built image to the registry
-        --platform <PLATFORM>   Target platform for the image if server is multi-platform capable
-        --distro <distro>       Target Linux distribution"
+        --pull                      Always attempt to pull a newer version of the base images
+        --push                      Push the built image to the registry
+        --platform <PLATFORM>       Target platform for the image if server is multi-platform capable
+        --distro <distro>           Target Linux distribution
+        --download-ovs              Download OVS source code tarball from internet. Default is false.
+        --ipsec                     Build with IPsec support. Default is false."
 
 function print_usage {
     echoerr "$_usage"
@@ -36,8 +38,11 @@ function print_usage {
 
 PULL=false
 PUSH=false
+IPSEC=false
 PLATFORM=""
 DISTRO="ubuntu"
+DOWNLOAD_OVS=false
+SUPPORT_DISTROS=("ubuntu" "ubi")
 
 while [[ $# -gt 0 ]]
 do
@@ -60,6 +65,14 @@ case $key in
     DISTRO="$2"
     shift 2
     ;;
+    --download-ovs)
+    DOWNLOAD_OVS=true
+    shift
+    ;;
+    --ipsec)
+    IPSEC=true
+    shift
+    ;;
     -h|--help)
     print_usage
     exit 0
@@ -81,7 +94,15 @@ if [ "$PLATFORM" != "" ]; then
     PLATFORM_ARG="--platform $PLATFORM"
 fi
 
-if [ "$DISTRO" != "ubuntu" ] && [ "$DISTRO" != "ubi" ]; then
+DISTRO_VALID=false
+for dist in "${SUPPORT_DISTROS[@]}"; do
+    if [ "$DISTRO" == "$dist" ]; then
+        DISTRO_VALID=true
+        break
+    fi
+done
+
+if ! $DISTRO_VALID; then
     echoerr "Invalid distribution $DISTRO"
     exit 1
 fi
@@ -93,6 +114,16 @@ pushd $THIS_DIR > /dev/null
 OVS_VERSION=$(head -n 1 ../deps/ovs-version)
 
 BUILD_TAG=$(../build-tag.sh)
+if [ "$IPSEC" == "true" ]; then
+    BUILD_TAG="${BUILD_TAG}-ipsec"
+fi
+
+if $DOWNLOAD_OVS; then
+    curl -LO https://www.openvswitch.org/releases/openvswitch-$OVS_VERSION.tar.gz
+elif [ ! -f openvswitch-$OVS_VERSION.tar.gz ]; then
+    echoerr "openvswitch-$OVS_VERSION.tar.gz not found. Use --download-ovs true to download it."
+    exit 1
+fi
 
 # This is a bit complicated but we make sure that we only build OVS if
 # necessary, and at the moment --cache-from does not play nicely with multistage
@@ -136,18 +167,22 @@ if [ "$DISTRO" == "ubuntu" ]; then
     docker build $PLATFORM_ARG --target ovs-debs \
            --cache-from antrea/openvswitch-debs:$BUILD_TAG \
            -t antrea/openvswitch-debs:$BUILD_TAG \
-           --build-arg OVS_VERSION=$OVS_VERSION .
+           --build-arg OVS_VERSION=$OVS_VERSION \
+           --build-arg IPSEC=$IPSEC .
 
     docker build $PLATFORM_ARG \
            --cache-from antrea/openvswitch-debs:$BUILD_TAG \
            --cache-from antrea/openvswitch:$BUILD_TAG \
            -t antrea/openvswitch:$BUILD_TAG \
-           --build-arg OVS_VERSION=$OVS_VERSION .
+           --build-arg OVS_VERSION=$OVS_VERSION \
+           --build-arg IPSEC=$IPSEC .
+
 elif [ "$DISTRO" == "ubi" ]; then
     docker build $PLATFORM_ARG --target ovs-rpms \
            --cache-from antrea/openvswitch-rpms:$BUILD_TAG \
            -t antrea/openvswitch-rpms:$BUILD_TAG \
            --build-arg OVS_VERSION=$OVS_VERSION \
+           --build-arg IPSEC=$IPSEC \
            -f Dockerfile.ubi .
 
     docker build \
@@ -155,6 +190,7 @@ elif [ "$DISTRO" == "ubi" ]; then
            --cache-from antrea/openvswitch-ubi:$BUILD_TAG \
            -t antrea/openvswitch-ubi:$BUILD_TAG \
            --build-arg OVS_VERSION=$OVS_VERSION \
+           --build-arg IPSEC=$IPSEC \
            -f Dockerfile.ubi .
 fi
 

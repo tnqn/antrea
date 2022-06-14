@@ -28,6 +28,10 @@ Build the antrea base image.
         --pull                  Always attempt to pull a newer version of the base images
         --push                  Push the built image to the registry
         --platform <PLATFORM>   Target platform for the image if server is multi-platform capable
+        --download-cni-binaries Download CNI binaries from internet. You can also download the
+                                binaries manually and put them in the current directory.
+                                Currently cni-plugins-*.tgz and whereabouts-*.tgz are required.
+        --ipsec                 Build with IPsec support Default is false.
         --distro <distro>       Target Linux distribution"
 
 function print_usage {
@@ -38,6 +42,9 @@ PULL=false
 PUSH=false
 PLATFORM=""
 DISTRO="ubuntu"
+DOWNLOAD_CNI_BINARIES=false
+IPSEC=false
+SUPPORT_DISTROS=("ubuntu" "ubi")
 
 while [[ $# -gt 0 ]]
 do
@@ -60,6 +67,14 @@ case $key in
     DISTRO="$2"
     shift 2
     ;;
+    --ipsec)
+    IPSEC=true
+    shift
+    ;;
+    --download-cni-binaries)
+    DOWNLOAD_CNI_BINARIES=true
+    shift
+    ;;
     -h|--help)
     print_usage
     exit 0
@@ -81,7 +96,15 @@ if [ "$PLATFORM" != "" ]; then
     PLATFORM_ARG="--platform $PLATFORM"
 fi
 
-if [ "$DISTRO" != "ubuntu" ] && [ "$DISTRO" != "ubi" ]; then
+DISTRO_VALID=false
+for dist in "${SUPPORT_DISTROS[@]}"; do
+    if [ "$DISTRO" == "$dist" ]; then
+        DISTRO_VALID=true
+        break
+    fi
+done
+
+if ! $DISTRO_VALID; then
     echoerr "Invalid distribution $DISTRO"
     exit 1
 fi
@@ -94,6 +117,20 @@ CNI_BINARIES_VERSION=$(head -n 1 ../deps/cni-binaries-version)
 SURICATA_VERSION=$(head -n 1 ../deps/suricata-version)
 
 BUILD_TAG=$(../build-tag.sh)
+if [ "$IPSEC" == "true" ]; then
+    BUILD_TAG="${BUILD_TAG}-ipsec"
+fi
+
+# Ignore the version of the CNI binaries if we do not want to download them.
+if ! [ ${DOWNLOAD_CNI_BINARIES} == "true" ] && ! compgen -G "cni-plugins-*.tgz" > /dev/null; then
+    echoerr "CNI binaries tarball not found. Use --download-cni-binaries to download it."
+    exit 1
+fi
+
+if ! [ ${DOWNLOAD_CNI_BINARIES} == "true" ] && ! compgen -G "whereabouts-*.tgz" > /dev/null; then
+    echoerr "Whereabouts tarball not found. Use --download-cni-binaries to download it."
+    exit 1
+fi
 
 if $PULL; then
     if [[ ${DOCKER_REGISTRY} == "" ]]; then
@@ -132,6 +169,7 @@ fi
 docker build $PLATFORM_ARG --target cni-binaries \
        --cache-from antrea/cni-binaries:$CNI_BINARIES_VERSION \
        -t antrea/cni-binaries:$CNI_BINARIES_VERSION \
+       --build-arg DOWNLOAD_CNI_BINARIES=$DOWNLOAD_CNI_BINARIES \
        --build-arg CNI_BINARIES_VERSION=$CNI_BINARIES_VERSION \
        --build-arg BUILD_TAG=$BUILD_TAG .
 
@@ -140,6 +178,7 @@ if [ "$DISTRO" == "ubuntu" ]; then
            --cache-from antrea/cni-binaries:$CNI_BINARIES_VERSION \
            --cache-from antrea/base-ubuntu:$BUILD_TAG \
            -t antrea/base-ubuntu:$BUILD_TAG \
+           --build-arg DOWNLOAD_CNI_BINARIES=$DOWNLOAD_CNI_BINARIES \
            --build-arg CNI_BINARIES_VERSION=$CNI_BINARIES_VERSION \
            --build-arg SURICATA_VERSION=$SURICATA_VERSION \
            --build-arg BUILD_TAG=$BUILD_TAG .
