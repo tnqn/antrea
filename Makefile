@@ -342,6 +342,15 @@ mockgen:
 	$(CURDIR)/hack/update-codegen.sh mockgen
 
 ### Docker images ###
+.PHONY: debian
+debian:
+	@echo "===> Building antrea/antrea-debian Docker image <==="
+ifneq ($(NO_PULL),)
+	docker build -t antrea/antrea-debian:$(DOCKER_IMG_VERSION) -f build/images/Dockerfile.debian $(DOCKER_BUILD_ARGS) .
+else
+	docker build --pull -t antrea/antrea-debian:$(DOCKER_IMG_VERSION) -f build/images/Dockerfile.debian $(DOCKER_BUILD_ARGS) .
+endif
+	docker tag antrea/antrea-debian:$(DOCKER_IMG_VERSION) antrea/antrea-debian
 
 .PHONY: ubuntu
 ubuntu:

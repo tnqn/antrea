@@ -1,0 +1,43 @@
+# Copyright 2022 Antrea Authors
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+ARG BUILD_TAG
+ARG CNI_BINARIES_VERSION
+
+FROM antrea/cni-binaries:${CNI_BINARIES_VERSION} as cni-binaries
+
+FROM antrea/openvswitch-debian:${BUILD_TAG}
+
+RUN echo "deb http://build-artifactory.eng.vmware.com/debian-remote stable main" > /etc/apt/sources.list && \
+    echo "deb http://build-artifactory.eng.vmware.com/debian-remote stable-updates main" >> /etc/apt/sources.list && \
+    echo "deb http://build-artifactory.eng.vmware.com/debian-security-remote stable-security main" >> /etc/apt/sources.list
+
+LABEL maintainer="Antrea <projectantrea-dev@googlegroups.com>"
+LABEL description="An Debian based Docker base image for Antrea."
+
+COPY iptables-wrapper-installer.sh /iptables-wrapper-installer.sh
+
+USER root
+
+RUN apt-get update && apt-get upgrade -y && apt-get install -y --no-install-recommends \
+    ipset \
+    jq \
+    ca-certificates \
+    ethtool \
+    inotify-tools \
+    suricata && \
+    rm -rf /var/lib/apt/lists/* /var/cache/apt/* && \
+    /iptables-wrapper-installer.sh
+
+COPY --from=cni-binaries /opt/cni/bin /opt/cni/bin

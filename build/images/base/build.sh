@@ -44,7 +44,7 @@ PLATFORM=""
 DISTRO="ubuntu"
 DOWNLOAD_CNI_BINARIES=false
 IPSEC=false
-SUPPORT_DISTROS=("ubuntu" "ubi")
+SUPPORT_DISTROS=("ubuntu" "ubi" "debian")
 
 while [[ $# -gt 0 ]]
 do
@@ -188,6 +188,15 @@ elif [ "$DISTRO" == "ubi" ]; then
            --cache-from antrea/base-ubi:$BUILD_TAG \
            -t antrea/base-ubi:$BUILD_TAG \
            -f Dockerfile.ubi \
+           --build-arg CNI_BINARIES_VERSION=$CNI_BINARIES_VERSION \
+           --build-arg SURICATA_VERSION=$SURICATA_VERSION \
+           --build-arg BUILD_TAG=$BUILD_TAG .
+elif [ "$DISTRO" == "debian" ]; then
+    docker build $PLATFORM_ARG \
+           --cache-from antrea/cni-binaries:$CNI_BINARIES_VERSION \
+           --cache-from antrea/base-debian:$BUILD_TAG \
+           -t antrea/base-debian:$BUILD_TAG \
+           -f Dockerfile.debian \
            --build-arg CNI_BINARIES_VERSION=$CNI_BINARIES_VERSION \
            --build-arg SURICATA_VERSION=$SURICATA_VERSION \
            --build-arg BUILD_TAG=$BUILD_TAG .

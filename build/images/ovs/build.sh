@@ -42,7 +42,7 @@ IPSEC=false
 PLATFORM=""
 DISTRO="ubuntu"
 DOWNLOAD_OVS=false
-SUPPORT_DISTROS=("ubuntu" "ubi")
+SUPPORT_DISTROS=("ubuntu" "ubi" "debian")
 
 while [[ $# -gt 0 ]]
 do
@@ -192,6 +192,22 @@ elif [ "$DISTRO" == "ubi" ]; then
            --build-arg OVS_VERSION=$OVS_VERSION \
            --build-arg IPSEC=$IPSEC \
            -f Dockerfile.ubi .
+
+elif [ "$DISTRO" == "debian" ];then
+    docker build $PLATFORM_ARG --target ovs-debian-debs \
+           --cache-from antrea/openvswitch-debian-debs:$BUILD_TAG \
+           -t antrea/openvswitch-debian-debs:$BUILD_TAG \
+           --build-arg OVS_VERSION=$OVS_VERSION \
+           --build-arg IPSEC=$IPSEC \
+           -f Dockerfile.debian .
+
+    docker build $PLATFORM_ARG \
+           --cache-from antrea/openvswitch-debian-debs:$BUILD_TAG \
+           --cache-from antrea/openvswitch-debian:$BUILD_TAG \
+           -t antrea/openvswitch-debian:$BUILD_TAG \
+           --build-arg OVS_VERSION=$OVS_VERSION \
+           --build-arg IPSEC=$IPSEC \
+           -f Dockerfile.debian .
 fi
 
 if $PUSH; then
