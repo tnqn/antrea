@@ -357,6 +357,16 @@ else
 endif
 	docker tag antrea/antrea-debian:$(DOCKER_IMG_VERSION) antrea/antrea-debian
 
+.PHONY: photon
+photon:
+	@echo "===> Building antrea/antrea-photon Docker image <==="
+ifneq ($(NO_PULL),)
+	docker build -t antrea/antrea-photon:$(DOCKER_IMG_VERSION) -f build/images/Dockerfile.photon --build-arg RPM_REPO_URL=${RPM_REPO_URL} $(DOCKER_BUILD_ARGS) .
+else
+	docker build --pull -t antrea/antrea-photon:$(DOCKER_IMG_VERSION) -f build/images/Dockerfile.photon --build-arg RPM_REPO_URL=${RPM_REPO_URL} $(DOCKER_BUILD_ARGS) .
+endif
+	docker tag antrea/antrea-photon:$(DOCKER_IMG_VERSION) antrea/antrea-photon
+
 .PHONY: ubuntu
 ubuntu:
 	@echo "===> Building antrea/antrea-ubuntu Docker image <==="

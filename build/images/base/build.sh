@@ -32,7 +32,8 @@ Build the antrea base image.
                                 binaries manually and put them in the current directory.
                                 Currently cni-plugins-*.tgz and whereabouts-*.tgz are required.
         --ipsec                 Build with IPsec support Default is false.
-        --distro <distro>       Target Linux distribution"
+        --distro <distro>       Target Linux distribution.
+        --rpm-repo-url <url>    URL of the RPM repository to use for Photon builds."
 
 function print_usage {
     echoerr "$_usage"
@@ -44,7 +45,8 @@ PLATFORM=""
 DISTRO="ubuntu"
 DOWNLOAD_CNI_BINARIES=false
 IPSEC=false
-SUPPORT_DISTROS=("ubuntu" "ubi" "debian")
+RPM_REPO_URL=""
+SUPPORT_DISTROS=("ubuntu" "ubi" "debian" "photon")
 
 while [[ $# -gt 0 ]]
 do
@@ -74,6 +76,10 @@ case $key in
     --download-cni-binaries)
     DOWNLOAD_CNI_BINARIES=true
     shift
+    ;;
+    --rpm-repo-url)
+    RPM_REPO_URL="$2"
+    shift 2
     ;;
     -h|--help)
     print_usage
@@ -199,6 +205,16 @@ elif [ "$DISTRO" == "debian" ]; then
            -f Dockerfile.debian \
            --build-arg CNI_BINARIES_VERSION=$CNI_BINARIES_VERSION \
            --build-arg SURICATA_VERSION=$SURICATA_VERSION \
+           --build-arg BUILD_TAG=$BUILD_TAG .
+elif [ "$DISTRO" == "photon" ]; then
+    docker build $PLATFORM_ARG \
+           --cache-from antrea/cni-binaries:$CNI_BINARIES_VERSION \
+           --cache-from antrea/base-photon:$BUILD_TAG \
+           -t antrea/base-photon:$BUILD_TAG \
+           -f Dockerfile.photon \
+           --build-arg CNI_BINARIES_VERSION=$CNI_BINARIES_VERSION \
+           --build-arg SURICATA_VERSION=$SURICATA_VERSION \
+           --build-arg RPM_REPO_URL=$RPM_REPO_URL \
            --build-arg BUILD_TAG=$BUILD_TAG .
 fi
 

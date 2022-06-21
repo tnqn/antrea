@@ -30,7 +30,8 @@ Build the antrea openvswitch image.
         --platform <PLATFORM>       Target platform for the image if server is multi-platform capable
         --distro <distro>           Target Linux distribution
         --download-ovs              Download OVS source code tarball from internet. Default is false.
-        --ipsec                     Build with IPsec support. Default is false."
+        --ipsec                     Build with IPsec support. Default is false.
+        --rpm-repo-url <url>        URL of the RPM repository to use for Photon builds."
 
 function print_usage {
     echoerr "$_usage"
@@ -42,7 +43,8 @@ IPSEC=false
 PLATFORM=""
 DISTRO="ubuntu"
 DOWNLOAD_OVS=false
-SUPPORT_DISTROS=("ubuntu" "ubi" "debian")
+RPM_REPO_URL=""
+SUPPORT_DISTROS=("ubuntu" "ubi" "debian" "photon")
 
 while [[ $# -gt 0 ]]
 do
@@ -72,6 +74,10 @@ case $key in
     --ipsec)
     IPSEC=true
     shift
+    ;;
+    --rpm-repo-url)
+    RPM_REPO_URL="$2"
+    shift 2
     ;;
     -h|--help)
     print_usage
@@ -208,6 +214,34 @@ elif [ "$DISTRO" == "debian" ];then
            --build-arg OVS_VERSION=$OVS_VERSION \
            --build-arg IPSEC=$IPSEC \
            -f Dockerfile.debian .
+
+elif [ "$DISTRO" == "photon" ]; then
+    if [ "$RPM_REPO_URL" == "" ]; then
+        echoerr "Must specify --rpm-repo-url when building for Photon"
+        exit 1
+    fi
+    if [ "$IPSEC" == "true" ]; then
+        echoerr "IPsec is not supported for Photon"
+        exit 1
+    fi
+    if ! [ -f "photon-rootfs.tar.gz" ]; then
+        echoerr "photon-rootfs.tar.gz not found."
+        exit 1
+    fi
+    docker build $PLATFORM_ARG --target ovs-photon-rpms \
+           --cache-from antrea/openvswitch-photon-rpms:$BUILD_TAG \
+           -t antrea/openvswitch-photon-rpms:$BUILD_TAG \
+           --build-arg OVS_VERSION=$OVS_VERSION \
+           --build-arg RPM_REPO_URL=$RPM_REPO_URL \
+           -f Dockerfile.photon .
+
+    docker build $PLATFORM_ARG \
+           --cache-from antrea/openvswitch-photon-rpms:$BUILD_TAG \
+           --cache-from antrea/openvswitch-photon:$BUILD_TAG \
+           -t antrea/openvswitch-photon:$BUILD_TAG \
+           --build-arg OVS_VERSION=$OVS_VERSION \
+           --build-arg RPM_REPO_URL=$RPM_REPO_URL \
+           -f Dockerfile.photon .
 fi
 
 if $PUSH; then
