@@ -28,7 +28,7 @@ import (
 )
 
 const (
-	ipamHostLocal  = "host-local"
+	IPAMHostLocal  = "host-local"
 	defaultCNIPath = "/opt/cni/bin"
 )
 
@@ -125,5 +125,5 @@ func delegateNoResult(delegatePlugin string, networkConfig []byte, args *invoke.
 }
 
 func init() {
-	RegisterIPAMDriver(ipamHostLocal, &IPAMDelegator{pluginType: ipamHostLocal})
+	RegisterIPAMDriver(IPAMHostLocal, &IPAMDelegator{pluginType: IPAMHostLocal})
 }

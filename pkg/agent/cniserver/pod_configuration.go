@@ -20,6 +20,7 @@ import (
 	"net"
 	"strings"
 
+	cnitypes "github.com/containernetworking/cni/pkg/types"
 	"github.com/containernetworking/cni/pkg/types/current"
 	"github.com/containernetworking/cni/pkg/version"
 	corev1 "k8s.io/api/core/v1"
@@ -34,6 +35,7 @@ import (
 	"antrea.io/antrea/pkg/agent/secondarynetwork/cnipodcache"
 	agenttypes "antrea.io/antrea/pkg/agent/types"
 	"antrea.io/antrea/pkg/agent/util"
+	cnipb "antrea.io/antrea/pkg/apis/cni/v1beta1"
 	"antrea.io/antrea/pkg/ovs/ovsconfig"
 	"antrea.io/antrea/pkg/util/channel"
 	"antrea.io/antrea/pkg/util/k8s"
@@ -70,6 +72,8 @@ type podConfigurator struct {
 	podUpdateNotifier channel.Notifier
 	// consumed by secondary network creation.
 	podInfoStore cnipodcache.CNIPodInfoStore
+
+	enableBridgingMode   bool
 }
 
 func newPodConfigurator(
@@ -83,6 +87,7 @@ func newPodConfigurator(
 	podUpdateNotifier channel.Notifier,
 	podInfoStore cnipodcache.CNIPodInfoStore,
 	disableTXChecksumOffload bool,
+	enableBridgingMode bool,
 ) (*podConfigurator, error) {
 	ifConfigurator, err := newInterfaceConfigurator(ovsDatapathType, isOvsHardwareOffloadEnabled, disableTXChecksumOffload)
 	if err != nil {
@@ -97,6 +102,7 @@ func newPodConfigurator(
 		ifConfigurator:    ifConfigurator,
 		podUpdateNotifier: podUpdateNotifier,
 		podInfoStore:      podInfoStore,
+		enableBridgingMode: enableBridgingMode,
 	}, nil
 }
 
@@ -456,7 +462,28 @@ func (pc *podConfigurator) reconcile(pods []corev1.Pod, containerAccess *contain
 			}
 		} else {
 			// clean-up and delete interface
-			klog.V(4).Infof("Deleting interface %s", containerConfig.InterfaceName)
+			podName := containerConfig.PodName
+			podNamespace := containerConfig.PodNamespace
+			containerID := containerConfig.ContainerID
+			klog.InfoS("Cleaning up network for stale Pod", "Pod", k8s.NamespacedName(podNamespace, podName), "containerID", containerID)
+			// Release IP to IPAM driver
+			cniCmdArgs := &cnipb.CniCmdArgs{
+				ContainerId:          containerID,
+				NetworkConfiguration: nil, // TODO
+			}
+			k8sArgs := &types.K8sArgs{
+				K8S_POD_NAME: cnitypes.UnmarshallableString(podName),
+				K8S_POD_NAMESPACE:  cnitypes.UnmarshallableString(podNamespace),
+				K8S_POD_INFRA_CONTAINER_ID:  cnitypes.UnmarshallableString(containerID),
+			}
+			ipamType := ipam.IPAMHostLocal
+			if pc.enableBridgingMode {
+				// When the bridging mode is enabled, Antrea ignores IPAM type from request.
+				ipamType = ipam.AntreaIPAMType
+			}
+			if err := ipam.ExecIPAMDelete(cniCmdArgs, k8sArgs, ipamType, containerID); err != nil {
+				klog.ErrorS(err, "Failed to delete IP addresses for stale Pod", "Pod", k8s.NamespacedName(podNamespace, podName), "containerID", containerID)
+			}
 			if err := pc.removeInterfaces(containerConfig.ContainerID); err != nil {
 				klog.Errorf("Failed to delete interface %s: %v", containerConfig.InterfaceName, err)
 			}

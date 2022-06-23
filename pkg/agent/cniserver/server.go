@@ -662,7 +662,7 @@ func (s *CNIServer) Initialize(
 	s.podConfigurator, err = newPodConfigurator(
 		ovsBridgeClient, ofClient, s.routeClient, ifaceStore, s.nodeConfig.GatewayConfig.MAC,
 		ovsBridgeClient.GetOVSDatapathType(), ovsBridgeClient.IsHardwareOffloadEnabled(), podUpdateNotifier,
-		podInfoStore, s.disableTXChecksumOffload,
+		podInfoStore, s.disableTXChecksumOffload, s.enableBridgingMode,
 	)
 	if err != nil {
 		return fmt.Errorf("error during initialize podConfigurator: %v", err)

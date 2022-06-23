@@ -364,5 +364,5 @@ func init() {
 	RegisterIPAMDriver(AntreaIPAMType, antreaIPAMDriver)
 
 	// Host local plugin is fallback driver
-	RegisterIPAMDriver(AntreaIPAMType, &IPAMDelegator{pluginType: ipamHostLocal})
+	RegisterIPAMDriver(AntreaIPAMType, &IPAMDelegator{pluginType: IPAMHostLocal})
 }
