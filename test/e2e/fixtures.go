@@ -49,6 +49,12 @@ func skipIfAntreaIPAMTest(tb testing.TB) {
 	}
 }
 
+func skipIfRunOnTKGs(tb testing.TB) {
+	if testOptions.runOnTKGs {
+		tb.Skipf("Skipping test when running on TKGs: %s", tb.Name())
+	}
+}
+
 func skipIfNotFlowVisibilityTest(tb testing.TB) {
 	if !testOptions.flowVisibility {
 		tb.Skipf("Skipping when not running flow visibility test")

@@ -654,6 +654,7 @@ func testACNPAllowNoDefaultIsolation(t *testing.T, protocol AntreaPolicyProtocol
 		// investigating the issue and disabling the tests for IPv6 clusters in the
 		// meantime.
 		skipIfIPv6Cluster(t)
+		skipIfRunOnTKGs(t)
 	}
 	builder := &ClusterNetworkPolicySpecBuilder{}
 	builder = builder.SetName("acnp-allow-x-ingress-y-egress-z").
@@ -691,6 +692,7 @@ func testACNPDropEgress(t *testing.T, protocol AntreaPolicyProtocol) {
 		// investigating the issue and disabling the tests for IPv6 clusters in the
 		// meantime.
 		skipIfIPv6Cluster(t)
+		skipIfRunOnTKGs(t)
 	}
 	builder := &ClusterNetworkPolicySpecBuilder{}
 	builder = builder.SetName("acnp-deny-a-to-z-egress").

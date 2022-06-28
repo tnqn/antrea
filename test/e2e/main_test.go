@@ -81,6 +81,7 @@ func testMain(m *testing.M) int {
 	flag.BoolVar(&testOptions.enableCoverage, "coverage", false, "Run tests and measure coverage")
 	flag.BoolVar(&testOptions.enableAntreaIPAM, "antrea-ipam", false, "Run tests with AntreaIPAM")
 	flag.BoolVar(&testOptions.flowVisibility, "flow-visibility", false, "Run flow visibility tests")
+	flag.BoolVar(&testOptions.runOnTKGs, "tkgs", false, "Run tests on TKGs")
 	flag.StringVar(&testOptions.coverageDir, "coverage-dir", "", "Directory for coverage data files")
 	flag.StringVar(&testOptions.skipCases, "skip", "", "Key words to skip cases")
 	flag.StringVar(&testOptions.linuxVMs, "linuxVMs", "", "hostname of Linux VMs")

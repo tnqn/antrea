@@ -194,6 +194,7 @@ type TestOptions struct {
 	skipCases           string
 	linuxVMs            string
 	windowsVMs          string
+	runOnTKGs           bool
 }
 
 var testOptions TestOptions
