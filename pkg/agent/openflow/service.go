@@ -44,6 +44,7 @@ type featureService struct {
 	networkConfig          *config.NetworkConfig
 	gatewayPort            uint32
 
+	enablePolicy          bool
 	enableProxy           bool
 	proxyAll              bool
 	connectUplinkToBridge bool
@@ -113,6 +114,7 @@ func newFeatureService(
 		gatewayMAC:             nodeConfig.GatewayConfig.MAC,
 		gatewayPort:            nodeConfig.GatewayConfig.OFPort,
 		networkConfig:          networkConfig,
+		enablePolicy:           false,
 		enableProxy:            enableProxy,
 		proxyAll:               proxyAll,
 		connectUplinkToBridge:  connectUplinkToBridge,

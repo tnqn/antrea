@@ -770,16 +770,18 @@ func (c *client) generatePipelines() {
 	c.activatedFeatures = append(c.activatedFeatures, c.featurePodConnectivity)
 	c.traceableFeatures = append(c.traceableFeatures, c.featurePodConnectivity)
 
-	c.featureNetworkPolicy = newFeatureNetworkPolicy(c.cookieAllocator,
-		c.ipProtocols,
-		c.bridge,
-		c.ovsMetersAreSupported,
-		c.enableDenyTracking,
-		c.enableAntreaPolicy,
-		c.enableMulticast,
-		c.connectUplinkToBridge)
-	c.activatedFeatures = append(c.activatedFeatures, c.featureNetworkPolicy)
-	c.traceableFeatures = append(c.traceableFeatures, c.featureNetworkPolicy)
+	if c.enablePolicy {
+		c.featureNetworkPolicy = newFeatureNetworkPolicy(c.cookieAllocator,
+			c.ipProtocols,
+			c.bridge,
+			c.ovsMetersAreSupported,
+			c.enableDenyTracking,
+			c.enableAntreaPolicy,
+			c.enableMulticast,
+			c.connectUplinkToBridge)
+		c.activatedFeatures = append(c.activatedFeatures, c.featureNetworkPolicy)
+		c.traceableFeatures = append(c.traceableFeatures, c.featureNetworkPolicy)
+	}
 
 	c.featureService = newFeatureService(c.cookieAllocator,
 		c.ipProtocols,

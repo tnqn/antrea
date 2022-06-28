@@ -46,6 +46,7 @@ type featurePodConnectivity struct {
 	connectUplinkToBridge bool
 	ctZoneSrcField        *binding.RegField
 	ipCtZoneTypeRegMarks  map[binding.Protocol]*binding.RegMark
+	enablePolicy          bool
 	enableMulticast       bool
 	proxyAll              bool
 	enableTrafficControl  bool
@@ -120,6 +121,7 @@ func newFeaturePodConnectivity(
 		enableTrafficControl:  enableTrafficControl,
 		ipCtZoneTypeRegMarks:  ipCtZoneTypeRegMarks,
 		ctZoneSrcField:        getZoneSrcField(connectUplinkToBridge),
+		enablePolicy:          false,
 		enableMulticast:       enableMulticast,
 		proxyAll:              proxyAll,
 		category:              cookie.PodConnectivity,
@@ -152,14 +154,16 @@ func (f *featurePodConnectivity) initFlows() []binding.Flow {
 	}
 	flows = append(flows, f.l3FwdFlowToExternal())
 	flows = append(flows, f.decTTLFlows()...)
-	flows = append(flows, f.conntrackFlows()...)
+	if f.enablePolicy {
+		flows = append(flows, f.conntrackFlows()...)
+		// Add flow to ensure the liveliness check packet could be forwarded correctly.
+		flows = append(flows, f.localProbeFlows()...)
+	}
 	flows = append(flows, f.l2ForwardOutputFlow())
 	flows = append(flows, f.gatewayClassifierFlow())
 	flows = append(flows, f.l2ForwardCalcFlow(gatewayMAC, f.gatewayPort))
 	flows = append(flows, f.gatewayIPSpoofGuardFlows()...)
 	flows = append(flows, f.l3FwdFlowToGateway()...)
-	// Add flow to ensure the liveliness check packet could be forwarded correctly.
-	flows = append(flows, f.localProbeFlows()...)
 
 	if f.networkConfig.TrafficEncapMode.SupportsEncap() {
 		flows = append(flows, f.tunnelClassifierFlow(f.tunnelPort))

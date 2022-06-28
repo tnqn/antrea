@@ -400,6 +400,7 @@ type flowCategoryCache struct {
 }
 
 type client struct {
+	enablePolicy          bool
 	enableProxy           bool
 	proxyAll              bool
 	enableAntreaPolicy    bool
@@ -590,11 +591,15 @@ func (c *client) defaultFlows() []binding.Flow {
 
 // tunnelClassifierFlow generates the flow to mark the packets from tunnel port.
 func (f *featurePodConnectivity) tunnelClassifierFlow(tunnelOFPort uint32) binding.Flow {
+	nextStage := stageConntrackState
+	if !f.enablePolicy {
+		nextStage = stagePreRouting
+	}
 	return ClassifierTable.ofTable.BuildFlow(priorityNormal).
 		Cookie(f.cookieAllocator.Request(f.category).Raw()).
 		MatchInPort(tunnelOFPort).
 		Action().LoadRegMark(FromTunnelRegMark, RewriteMACRegMark).
-		Action().GotoStage(stageConntrackState).
+		Action().GotoStage(nextStage).
 		Done()
 }
 
@@ -1576,6 +1581,10 @@ func (f *featurePodConnectivity) gatewayIPSpoofGuardFlows() []binding.Flow {
 
 // serviceCIDRDNATFlows generates the flows to match destination IP in Service CIDR and output to the Antrea gateway directly.
 func (f *featureService) serviceCIDRDNATFlows() []binding.Flow {
+	nextStage := stageConntrack
+	if !f.enablePolicy {
+		nextStage = stageOutput
+	}
 	cookieID := f.cookieAllocator.Request(f.category).Raw()
 	var flows []binding.Flow
 	for ipProtocol, serviceCIDR := range f.serviceCIDRs {
@@ -1585,7 +1594,7 @@ func (f *featureService) serviceCIDRDNATFlows() []binding.Flow {
 			MatchDstIPNet(serviceCIDR).
 			Action().LoadToRegField(TargetOFPortField, f.gatewayPort).
 			Action().LoadRegMark(OFPortFoundRegMark).
-			Action().GotoStage(stageConntrack).
+			Action().GotoStage(nextStage).
 			Done())
 	}
 	return flows
@@ -2731,6 +2740,7 @@ func NewClient(bridgeName string,
 	bridge := binding.NewOFBridge(bridgeName, mgmtAddr)
 	c := &client{
 		bridge:                bridge,
+		enablePolicy:          false,
 		enableProxy:           enableProxy,
 		proxyAll:              proxyAll,
 		enableAntreaPolicy:    enableAntreaPolicy,

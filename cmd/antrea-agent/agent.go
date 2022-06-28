@@ -332,27 +332,31 @@ func run(o *Options) error {
 	statusManagerEnabled := antreaPolicyEnabled
 	loggingEnabled := antreaPolicyEnabled
 
-	networkPolicyController, err := networkpolicy.NewNetworkPolicyController(
-		antreaClientProvider,
-		ofClient,
-		ifaceStore,
-		nodeConfig.Name,
-		podUpdateChannel,
-		groupCounters,
-		groupIDUpdates,
-		antreaPolicyEnabled,
-		antreaProxyEnabled,
-		statusManagerEnabled,
-		multicastEnabled,
-		loggingEnabled,
-		asyncRuleDeleteInterval,
-		o.dnsServerOverride,
-		v4Enabled,
-		v6Enabled,
-		nodeConfig.GatewayConfig.OFPort,
-		nodeConfig.TunnelOFPort)
-	if err != nil {
-		return fmt.Errorf("error creating new NetworkPolicy controller: %v", err)
+	policyEnabled := false
+	var networkPolicyController *networkpolicy.Controller
+	if policyEnabled {
+		networkPolicyController, err = networkpolicy.NewNetworkPolicyController(
+			antreaClientProvider,
+			ofClient,
+			ifaceStore,
+			nodeConfig.Name,
+			podUpdateChannel,
+			groupCounters,
+			groupIDUpdates,
+			antreaPolicyEnabled,
+			antreaProxyEnabled,
+			statusManagerEnabled,
+			multicastEnabled,
+			loggingEnabled,
+			asyncRuleDeleteInterval,
+			o.dnsServerOverride,
+			v4Enabled,
+			v6Enabled,
+			nodeConfig.GatewayConfig.OFPort,
+			nodeConfig.TunnelOFPort)
+		if err != nil {
+			return fmt.Errorf("error creating new NetworkPolicy controller: %v", err)
+		}
 	}
 
 	var egressController *egress.EgressController
@@ -534,7 +538,10 @@ func run(o *Options) error {
 
 	go nodeRouteController.Run(stopCh)
 
-	go networkPolicyController.Run(stopCh)
+	if policyEnabled {
+		go networkPolicyController.Run(stopCh)
+	}
+
 	// Initialize the NPL agent.
 	if enableNodePortLocal {
 		nplController, err := npl.InitializeNPLAgent(
@@ -666,7 +673,7 @@ func run(o *Options) error {
 
 	// statsCollector collects stats and reports to the antrea-controller periodically. For now it's only used for
 	// NetworkPolicy stats and Multicast stats.
-	if features.DefaultFeatureGate.Enabled(features.NetworkPolicyStats) {
+	if policyEnabled && features.DefaultFeatureGate.Enabled(features.NetworkPolicyStats) {
 		statsCollector := stats.NewCollector(antreaClientProvider, ofClient, networkPolicyController, mcastController)
 		go statsCollector.Run(stopCh)
 	}

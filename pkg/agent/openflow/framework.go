@@ -162,12 +162,9 @@ func (f *featurePodConnectivity) getRequiredTables() []*Table {
 	tables := []*Table{
 		ClassifierTable,
 		SpoofGuardTable,
-		ConntrackTable,
-		ConntrackStateTable,
 		L3ForwardingTable,
 		L3DecTTLTable,
 		L2ForwardingCalcTable,
-		ConntrackCommitTable,
 		L2ForwardingOutTable,
 	}
 
@@ -186,6 +183,9 @@ func (f *featurePodConnectivity) getRequiredTables() []*Table {
 				tables = append(tables, VLANTable)
 			}
 		}
+	}
+	if f.enablePolicy {
+		tables = append(tables, ConntrackTable, ConntrackStateTable, ConntrackCommitTable)
 	}
 	if f.enableTrafficControl {
 		tables = append(tables, TrafficControlTable)

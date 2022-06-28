@@ -145,7 +145,7 @@ func NewNetworkPolicyController(antreaClientGetter agent.AntreaClientProvider,
 		tunPort:              tunPort,
 	}
 
-	if antreaPolicyEnabled {
+	if false && antreaPolicyEnabled {
 		var err error
 		if c.fqdnController, err = newFQDNController(ofClient, idAllocator, dnsServerOverride, c.enqueueRule, v4Enabled, v6Enabled, gwPort); err != nil {
 			return nil, err
@@ -372,14 +372,23 @@ func NewNetworkPolicyController(antreaClientGetter agent.AntreaClientProvider,
 }
 
 func (c *Controller) GetNetworkPolicyNum() int {
+	if c == nil {
+		return 0
+	}
 	return c.ruleCache.GetNetworkPolicyNum()
 }
 
 func (c *Controller) GetAddressGroupNum() int {
+	if c == nil {
+		return 0
+	}
 	return c.ruleCache.GetAddressGroupNum()
 }
 
 func (c *Controller) GetAppliedToGroupNum() int {
+	if c == nil {
+		return 0
+	}
 	return c.ruleCache.GetAppliedToGroupNum()
 }
 
@@ -425,6 +434,9 @@ func (c *Controller) GetRuleByFlowID(ruleFlowID uint32) *types.PolicyRule {
 
 func (c *Controller) GetControllerConnectionStatus() bool {
 	// When the watchers are connected, controller connection status is true. Otherwise, it is false.
+	if c == nil {
+		return true
+	}
 	return c.addressGroupWatcher.isConnected() && c.appliedToGroupWatcher.isConnected() && c.networkPolicyWatcher.isConnected()
 }
 
