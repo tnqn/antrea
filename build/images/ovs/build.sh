@@ -242,6 +242,22 @@ elif [ "$DISTRO" == "photon" ]; then
            --build-arg OVS_VERSION=$OVS_VERSION \
            --build-arg RPM_REPO_URL=$RPM_REPO_URL \
            -f Dockerfile.photon .
+
+elif [ "$DISTRO" == "ubi" ]; then
+    docker build $PLATFORM_ARG --target ovs-rpms \
+           --cache-from antrea/openvswitch-rpms:$BUILD_TAG \
+           -t antrea/openvswitch-rpms:$BUILD_TAG \
+           --build-arg OVS_VERSION=$OVS_VERSION \
+           --build-arg IPSEC=$IPSEC \
+           -f Dockerfile.ubi .
+
+    docker build $PLATFORM_ARG \
+           --cache-from antrea/openvswitch-rpms:$BUILD_TAG \
+           --cache-from antrea/openvswitch-ubi:$BUILD_TAG \
+           -t antrea/openvswitch-ubi:$BUILD_TAG \
+           --build-arg OVS_VERSION=$OVS_VERSION \
+           --build-arg IPSEC=$IPSEC \
+           -f Dockerfile.ubi .
 fi
 
 if $PUSH; then
