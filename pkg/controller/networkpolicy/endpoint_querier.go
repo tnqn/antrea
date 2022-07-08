@@ -21,7 +21,6 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 
 	cpv1beta "antrea.io/antrea/pkg/apis/controlplane/v1beta2"
-	"antrea.io/antrea/pkg/controller/networkpolicy/store"
 	antreatypes "antrea.io/antrea/pkg/controller/types"
 )
 
@@ -101,16 +100,8 @@ func (eq *endpointQuerier) QueryNetworkPolicies(namespace string, podName string
 	// did not justify the memory overhead. If we can find another use for the Indexers as part
 	// of the NetworkPolicy Controller implementation, we may consider adding them back.
 	for _, appliedToGroupKey := range appliedToGroupKeys {
-		policies, err := eq.networkPolicyController.internalNetworkPolicyStore.GetByIndex(
-			store.AppliedToGroupIndex,
-			appliedToGroupKey,
-		)
-		if err != nil {
-			return nil, err
-		}
-		for _, policy := range policies {
-			applied = append(applied, policy.(*antreatypes.NetworkPolicy))
-		}
+		policies := eq.networkPolicyController.getInternalNetworkPoliciesByAppliedToGroup(appliedToGroupKey)
+		applied = append(applied, policies...)
 	}
 	// get all addressGroups using filter, then get ingress and egress policies using addressGroup
 	addressGroupKeys := groups[addressGroupType]
@@ -119,20 +110,14 @@ func (eq *endpointQuerier) QueryNetworkPolicies(namespace string, podName string
 		if !found {
 			continue
 		}
-		policies, err := eq.networkPolicyController.internalNetworkPolicyStore.GetByIndex(
-			store.AddressGroupIndex,
-			addressGroupKey,
-		)
-		if err != nil {
-			return nil, err
-		}
+		policies := eq.networkPolicyController.getInternalNetworkPoliciesByAddressGroup(addressGroupKey)
 		for _, policy := range policies {
 			egressIndex := 0
 			ingressIndex := 0
-			for _, rule := range policy.(*antreatypes.NetworkPolicy).Rules {
+			for _, rule := range policy.Rules {
 				for _, addressGroupTrial := range rule.To.AddressGroups {
 					if addressGroupTrial == string(addressGroup.(*antreatypes.AddressGroup).UID) {
-						egress = append(egress, &ruleTemp{policy: policy.(*antreatypes.NetworkPolicy), index: egressIndex})
+						egress = append(egress, &ruleTemp{policy: policy, index: egressIndex})
 						egressIndex++
 						// an AddressGroup can only be referenced in a rule once
 						break
@@ -140,7 +125,7 @@ func (eq *endpointQuerier) QueryNetworkPolicies(namespace string, podName string
 				}
 				for _, addressGroupTrial := range rule.From.AddressGroups {
 					if addressGroupTrial == string(addressGroup.(*antreatypes.AddressGroup).UID) {
-						ingress = append(ingress, &ruleTemp{policy: policy.(*antreatypes.NetworkPolicy), index: ingressIndex})
+						ingress = append(ingress, &ruleTemp{policy: policy, index: ingressIndex})
 						ingressIndex++
 						// an AddressGroup can only be referenced in a rule once
 						break
