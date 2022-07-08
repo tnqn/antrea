@@ -17,6 +17,7 @@ package networkpolicy
 import (
 	"fmt"
 
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/klog/v2"
@@ -24,70 +25,38 @@ import (
 	"antrea.io/antrea/pkg/apis/controlplane"
 	crdv1alpha1 "antrea.io/antrea/pkg/apis/crd/v1alpha1"
 	antreatypes "antrea.io/antrea/pkg/controller/types"
+	"antrea.io/antrea/pkg/util/k8s"
 )
 
-// addANP receives AntreaNetworkPolicy ADD events and creates resources
-// which can be consumed by agents to configure corresponding rules on the Nodes.
+func getANPReference(anp *crdv1alpha1.NetworkPolicy) *controlplane.NetworkPolicyReference {
+	return &controlplane.NetworkPolicyReference{
+		Type:      controlplane.AntreaNetworkPolicy,
+		Namespace: anp.Namespace,
+		Name:      anp.Name,
+		UID:       anp.UID,
+	}
+}
+
+// addANP receives AntreaNetworkPolicy ADD events and enqueues a reference of
+// the AntreaNetworkPolicy to trigger its process.
 func (n *NetworkPolicyController) addANP(obj interface{}) {
 	defer n.heartbeat("addANP")
 	np := obj.(*crdv1alpha1.NetworkPolicy)
 	klog.Infof("Processing Antrea NetworkPolicy %s/%s ADD event", np.Namespace, np.Name)
-	// Create an internal NetworkPolicy object corresponding to this
-	// NetworkPolicy and enqueue task to internal NetworkPolicy Workqueue.
-	internalNP := n.processAntreaNetworkPolicy(np)
-	klog.V(2).Infof("Creating new internal NetworkPolicy %s for %s", internalNP.Name, internalNP.SourceRef.ToString())
-	n.internalNetworkPolicyStore.Create(internalNP)
-	key := internalNetworkPolicyKeyFunc(np)
-	n.enqueueInternalNetworkPolicy(key)
+	n.enqueueInternalNetworkPolicy(getANPReference(np))
 }
 
-// updateANP receives AntreaNetworkPolicy UPDATE events and updates resources
-// which can be consumed by agents to configure corresponding rules on the Nodes.
+// updateANP receives AntreaNetworkPolicy UPDATE events and enqueues a reference
+// of the AntreaNetworkPolicy to trigger its process.
 func (n *NetworkPolicyController) updateANP(old, cur interface{}) {
 	defer n.heartbeat("updateANP")
 	curNP := cur.(*crdv1alpha1.NetworkPolicy)
 	klog.Infof("Processing Antrea NetworkPolicy %s/%s UPDATE event", curNP.Namespace, curNP.Name)
-	// Update an internal NetworkPolicy, corresponding to this NetworkPolicy and
-	// enqueue task to internal NetworkPolicy Workqueue.
-	curInternalNP := n.processAntreaNetworkPolicy(curNP)
-	klog.V(2).Infof("Updating existing internal NetworkPolicy %s for %s", curInternalNP.Name, curInternalNP.SourceRef.ToString())
-	// Retrieve old crdv1alpha1.NetworkPolicy object.
-	oldNP := old.(*crdv1alpha1.NetworkPolicy)
-	// Old and current NetworkPolicy share the same key.
-	key := internalNetworkPolicyKeyFunc(oldNP)
-	// Lock access to internal NetworkPolicy store such that concurrent access
-	// to an internal NetworkPolicy is not allowed. This will avoid the
-	// case in which an Update to an internal NetworkPolicy object may
-	// cause the SpanMeta member to be overridden with stale SpanMeta members
-	// from an older internal NetworkPolicy.
-	n.internalNetworkPolicyMutex.Lock()
-	oldInternalNPObj, _, _ := n.internalNetworkPolicyStore.Get(key)
-	oldInternalNP := oldInternalNPObj.(*antreatypes.NetworkPolicy)
-	// Must preserve old internal NetworkPolicy Span.
-	curInternalNP.SpanMeta = oldInternalNP.SpanMeta
-	n.internalNetworkPolicyStore.Update(curInternalNP)
-	// Unlock the internal NetworkPolicy store.
-	n.internalNetworkPolicyMutex.Unlock()
-	// Enqueue addressGroup keys to update their Node span.
-	for _, rule := range curInternalNP.Rules {
-		for _, addrGroupName := range rule.From.AddressGroups {
-			n.enqueueAddressGroup(addrGroupName)
-		}
-		for _, addrGroupName := range rule.To.AddressGroups {
-			n.enqueueAddressGroup(addrGroupName)
-		}
-	}
-	n.enqueueInternalNetworkPolicy(key)
-	for _, atg := range oldInternalNP.AppliedToGroups {
-		// Delete the old AppliedToGroup object if it is not referenced
-		// by any internal NetworkPolicy.
-		n.deleteDereferencedAppliedToGroup(atg)
-	}
-	n.deleteDereferencedAddressGroups(oldInternalNP)
+	n.enqueueInternalNetworkPolicy(getANPReference(curNP))
 }
 
-// deleteANP receives AntreaNetworkPolicy DELETED events and deletes resources
-// which can be consumed by agents to delete corresponding rules on the Nodes.
+// deleteANP receives AntreaNetworkPolicy DELETE events and enqueues a reference
+// of the AntreaNetworkPolicy to trigger its process.
 func (n *NetworkPolicyController) deleteANP(old interface{}) {
 	np, ok := old.(*crdv1alpha1.NetworkPolicy)
 	if !ok {
@@ -104,27 +73,13 @@ func (n *NetworkPolicyController) deleteANP(old interface{}) {
 	}
 	defer n.heartbeat("deleteANP")
 	klog.Infof("Processing Antrea NetworkPolicy %s/%s DELETE event", np.Namespace, np.Name)
-	key := internalNetworkPolicyKeyFunc(np)
-	oldInternalNPObj, _, _ := n.internalNetworkPolicyStore.Get(key)
-	oldInternalNP := oldInternalNPObj.(*antreatypes.NetworkPolicy)
-	klog.V(2).Infof("Deleting internal NetworkPolicy %s for %s", oldInternalNP.Name, oldInternalNP.SourceRef.ToString())
-	err := n.internalNetworkPolicyStore.Delete(key)
-	if err != nil {
-		klog.Errorf("Error deleting internal NetworkPolicy during Antrea NetworkPolicy %s delete: %v", np.Name, err)
-		return
-	}
-	for _, atg := range oldInternalNP.AppliedToGroups {
-		n.deleteDereferencedAppliedToGroup(atg)
-	}
-	n.deleteDereferencedAddressGroups(oldInternalNP)
+	n.enqueueInternalNetworkPolicy(getANPReference(np))
 }
 
 // processAntreaNetworkPolicy creates an internal NetworkPolicy instance
 // corresponding to the crdv1alpha1.NetworkPolicy object. This method
 // does not commit the internal NetworkPolicy in store, instead returns an
-// instance to the caller wherein, it will be either stored as a new Object
-// in case of ADD event or modified and store the updated instance, in case
-// of an UPDATE event.
+// instance to the caller wherein.
 func (n *NetworkPolicyController) processAntreaNetworkPolicy(np *crdv1alpha1.NetworkPolicy) *antreatypes.NetworkPolicy {
 	appliedToPerRule := len(np.Spec.AppliedTo) == 0
 	// appliedToGroupNames tracks all distinct appliedToGroups referred to by the Antrea NetworkPolicy,
@@ -147,7 +102,7 @@ func (n *NetworkPolicyController) processAntreaNetworkPolicy(np *crdv1alpha1.Net
 		}
 	}
 	// Create AppliedToGroup for each AppliedTo present in AntreaNetworkPolicy spec.
-	_, err := n.processAppliedTo(np.Namespace, np.Spec.AppliedTo, appliedToGroupNamesSet)
+	_, err := n.processAppliedTo(np.UID, np.Namespace, np.Spec.AppliedTo, appliedToGroupNamesSet)
 	if err != nil {
 		return newUnrealizableInternalNetworkPolicy(err)
 	}
@@ -156,7 +111,7 @@ func (n *NetworkPolicyController) processAntreaNetworkPolicy(np *crdv1alpha1.Net
 		// Set default action to ALLOW to allow traffic.
 		services, namedPortExists := toAntreaServicesForCRD(ingressRule.Ports, ingressRule.Protocols)
 		// Create AppliedToGroup for each AppliedTo present in the ingress rule.
-		atGroups, err := n.processAppliedTo(np.Namespace, ingressRule.AppliedTo, appliedToGroupNamesSet)
+		atGroups, err := n.processAppliedTo(np.UID, np.Namespace, ingressRule.AppliedTo, appliedToGroupNamesSet)
 		if err != nil {
 			return newUnrealizableInternalNetworkPolicy(err)
 		}
@@ -176,7 +131,7 @@ func (n *NetworkPolicyController) processAntreaNetworkPolicy(np *crdv1alpha1.Net
 		// Set default action to ALLOW to allow traffic.
 		services, namedPortExists := toAntreaServicesForCRD(egressRule.Ports, egressRule.Protocols)
 		// Create AppliedToGroup for each AppliedTo present in the egress rule.
-		atGroups, err := n.processAppliedTo(np.Namespace, egressRule.AppliedTo, appliedToGroupNamesSet)
+		atGroups, err := n.processAppliedTo(np.UID, np.Namespace, egressRule.AppliedTo, appliedToGroupNamesSet)
 		if err != nil {
 			return newUnrealizableInternalNetworkPolicy(err)
 		}
@@ -217,18 +172,20 @@ func (n *NetworkPolicyController) processAntreaNetworkPolicy(np *crdv1alpha1.Net
 	return internalNetworkPolicy
 }
 
-func (n *NetworkPolicyController) processAppliedTo(namespace string, appliedTo []crdv1alpha1.NetworkPolicyPeer, appliedToGroupNamesSet sets.String) ([]string, error) {
+// processAppliedTo creates AppliedToGroups for an ANP according to the provided NetworkPolicyPeers and adds the created
+// AppliedToGroups to the provided set.
+func (n *NetworkPolicyController) processAppliedTo(networkPolicyUID types.UID, namespace string, appliedTo []crdv1alpha1.NetworkPolicyPeer, appliedToGroupNamesSet sets.String) ([]string, error) {
 	var appliedToGroupNames []string
 	for _, at := range appliedTo {
 		var atg string
 		if at.Group != "" {
 			var err error
-			atg, err = n.processAppliedToGroupForNamespacedGroup(namespace, at.Group)
+			atg, err = n.createAppliedToGroupForNamespacedGroup(networkPolicyUID, namespace, at.Group)
 			if err != nil {
-				return appliedToGroupNames, err
+				return nil, err
 			}
 		} else {
-			atg = n.createAppliedToGroup(namespace, at.PodSelector, at.NamespaceSelector, at.ExternalEntitySelector)
+			atg = n.createAppliedToGroup(networkPolicyUID, namespace, at.PodSelector, at.NamespaceSelector, at.ExternalEntitySelector)
 		}
 		if atg != "" {
 			appliedToGroupNames = append(appliedToGroupNames, atg)
@@ -249,26 +206,23 @@ func (e ErrNetworkPolicyAppliedToUnsupportedGroup) Error() string {
 	return fmt.Sprintf("group %s/%s with IPBlocks or NamespaceSelector can not be used as AppliedTo", e.namespace, e.groupName)
 }
 
-func (n *NetworkPolicyController) processAppliedToGroupForNamespacedGroup(namespace, groupName string) (string, error) {
-	// Retrieve Group for corresponding entry in the AppliedToGroup.
-	g, err := n.grpLister.Groups(namespace).Get(groupName)
-	if err != nil {
-		// The Group referred to has not been created yet.
-		return "", nil
-	}
-	key := internalGroupKeyFunc(g)
-	// Find the internal Group corresponding to this Group
+func (n *NetworkPolicyController) createAppliedToGroupForNamespacedGroup(networkPolicyUID types.UID, namespace, groupName string) (string, error) {
+	// Namespaced group uses NAMESPACE/NAME as the key of the corresponding internal group.
+	key := k8s.NamespacedName(namespace, groupName)
+	// Find the internal Group corresponding to this Group.
+	// There is no need to check if the namespaced group exists in groupLister because its existence will eventually be
+	// reflected in internalGroupStore.
 	ig, found, _ := n.internalGroupStore.Get(key)
 	if !found {
-		// Internal Group was not found. Once the internal Group is created, the sync
-		// worker for internal group will re-enqueue the ClusterNetworkPolicy processing
-		// which will trigger the creation of AddressGroup.
+		// Internal Group is not found, which means the corresponding namespaced group is either not created yet or not
+		// processed yet. Once the internal Group is created and processed, the sync worker for internal group will
+		// re-enqueue the ClusterNetworkPolicy processing which will trigger the creation of AppliedToGroup.
 		return "", nil
 	}
 	intGrp := ig.(*antreatypes.Group)
 	if len(intGrp.IPBlocks) > 0 || (intGrp.Selector != nil && intGrp.Selector.NamespaceSelector != nil) {
-		klog.V(2).InfoS("Group with IPBlocks or NamespaceSelector can not be used as AppliedTo", "Group", g)
+		klog.V(2).InfoS("Group with IPBlocks or NamespaceSelector can not be used as AppliedTo", "Group", key)
 		return "", ErrNetworkPolicyAppliedToUnsupportedGroup{namespace: namespace, groupName: groupName}
 	}
-	return n.createAppliedToGroupForInternalGroup(intGrp), nil
+	return n.createAppliedToGroupForInternalGroup(networkPolicyUID, intGrp), nil
 }

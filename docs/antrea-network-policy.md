@@ -663,11 +663,8 @@ Kubernetes NetworkPolicies can also be audited using Antrea logging to the same 
 for all NetworkPolicies in the Namespace. Packets of any connection that match
 a NetworkPolicy rule will be logged with a reference to the NetworkPolicy name,
 but packets dropped by the implicit "default drop" (not allowed by any NetworkPolicy)
-will only be logged with consistent name `K8sNetworkPolicy` for reference.
-Note that currently, Antrea only retrieves the logging Annotation once when adding
-NetworkPolicies and in case of agent restart, users should not update Namespace
-logging Annotations, otherwise it would risk NetworkPolicies working in a stale state.
-The rules are logged in the following format:
+will only be logged with consistent name `K8sNetworkPolicy` for reference. The
+rules are logged in the following format:
 
 ```text
     <yyyy/mm/dd> <time> <ovs-table-name> <k8s-network-policy-reference> Allow <openflow-priority> <source-ip> <source-port> <destination-ip> <destination-port> <protocol> <packet-length>

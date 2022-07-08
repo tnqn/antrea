@@ -29,10 +29,9 @@ import (
 )
 
 const (
-	AppliedToGroupIndex   = "appliedToGroup"
-	AddressGroupIndex     = "addressGroup"
-	PerNamespaceRuleIndex = "hasPerNamespaceRule"
-	HasPerNamespaceRule   = "true"
+	AppliedToGroupIndex = "appliedToGroup"
+	AddressGroupIndex   = "addressGroup"
+	UIDIndex            = "uid"
 )
 
 // networkPolicyEvent implements storage.InternalEvent.
@@ -140,42 +139,25 @@ func NewNetworkPolicyStore() storage.Interface {
 	// appliedToGroups or addressGroups.
 	indexers := cache.Indexers{
 		AppliedToGroupIndex: func(obj interface{}) ([]string, error) {
-			fp, ok := obj.(*types.NetworkPolicy)
+			np, ok := obj.(*types.NetworkPolicy)
 			if !ok {
 				return []string{}, nil
 			}
-			if len(fp.AppliedToGroups) == 0 {
-				return []string{}, nil
-			}
-			return fp.AppliedToGroups, nil
+			return np.AppliedToGroups, nil
 		},
 		AddressGroupIndex: func(obj interface{}) ([]string, error) {
-			fp, ok := obj.(*types.NetworkPolicy)
-			var groupNames []string
+			np, ok := obj.(*types.NetworkPolicy)
 			if !ok {
 				return []string{}, nil
 			}
-			if len(fp.Rules) == 0 {
-				return []string{}, nil
-			}
-			for _, rule := range fp.Rules {
-				if rule.Direction == controlplane.DirectionIn {
-					groupNames = append(groupNames, rule.From.AddressGroups...)
-				} else if rule.Direction == controlplane.DirectionOut {
-					groupNames = append(groupNames, rule.To.AddressGroups...)
-				}
-			}
-			return groupNames, nil
+			return np.GetAddressGroups().UnsortedList(), nil
 		},
-		PerNamespaceRuleIndex: func(obj interface{}) ([]string, error) {
-			fp, ok := obj.(*types.NetworkPolicy)
+		UIDIndex: func(obj interface{}) ([]string, error) {
+			np, ok := obj.(*types.NetworkPolicy)
 			if !ok {
 				return []string{}, nil
 			}
-			if len(fp.PerNamespaceSelectors) > 0 {
-				return []string{HasPerNamespaceRule}, nil
-			}
-			return []string{}, nil
+			return []string{string(np.UID)}, nil
 		},
 	}
 	return ram.NewStore(NetworkPolicyKeyFunc, indexers, genNetworkPolicyEvent, keyAndSpanSelectFunc, func() runtime.Object { return new(controlplane.NetworkPolicy) })
