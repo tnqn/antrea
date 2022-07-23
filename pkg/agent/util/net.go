@@ -164,8 +164,10 @@ func GetIPNetDeviceFromIP(localIPs *ip.DualStackIPs, ignoredInterfaces sets.Stri
 	return v4IPNet, v6IPNet, iface, nil
 }
 
+var interfaceByName = net.InterfaceByName
+
 func GetIPNetDeviceByName(ifaceName string) (v4IPNet *net.IPNet, v6IPNet *net.IPNet, link *net.Interface, err error) {
-	link, err = net.InterfaceByName(ifaceName)
+	link, err = interfaceByName(ifaceName)
 	if err != nil {
 		return nil, nil, nil, err
 	}
