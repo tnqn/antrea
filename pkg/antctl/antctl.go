@@ -15,6 +15,7 @@
 package antctl
 
 import (
+	"antrea.io/antrea/pkg/antctl/raw/tcpdump"
 	"fmt"
 	"reflect"
 
@@ -573,6 +574,11 @@ $ antctl get podmulticaststats pod -n namespace`,
 		{
 			cobraCommand:      supportbundle.Command,
 			supportAgent:      true,
+			supportController: true,
+		},
+		{
+			cobraCommand:      tcpdump.Command,
+			supportAgent:      false,
 			supportController: true,
 		},
 		{

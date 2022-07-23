@@ -277,6 +277,8 @@ EOF
   fi
   kind create cluster --name $CLUSTER_NAME --config $config_file $IMAGE_OPT
 
+  docker run sender --image=sender
+
   # force coredns to run on control-plane node because it
   # is attached to kind bridge and uses host dns.
   # Worker Node may be configured to attach to custom bridges

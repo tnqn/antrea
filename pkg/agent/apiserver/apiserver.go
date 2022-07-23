@@ -15,6 +15,7 @@
 package apiserver
 
 import (
+	"antrea.io/antrea/pkg/agent/apiserver/handlers/tcpdump"
 	"fmt"
 	"io/ioutil"
 	"net"
@@ -86,6 +87,7 @@ func installHandlers(aq agentquerier.AgentQuerier, npq querier.AgentNetworkPolic
 	s.Handler.NonGoRestfulMux.HandleFunc("/ovsflows", ovsflows.HandleFunc(aq))
 	s.Handler.NonGoRestfulMux.HandleFunc("/ovstracing", ovstracing.HandleFunc(aq))
 	s.Handler.NonGoRestfulMux.HandleFunc("/serviceexternalip", serviceexternalip.HandleFunc(seipq))
+	s.Handler.NonGoRestfulMux.HandleFunc("/tcpdump", tcpdump.HandleFunc(aq))
 }
 
 func installAPIGroup(s *genericapiserver.GenericAPIServer, aq agentquerier.AgentQuerier, npq querier.AgentNetworkPolicyInfoQuerier, v4Enabled, v6Enabled bool) error {
@@ -121,7 +123,7 @@ func New(aq agentquerier.AgentQuerier, npq querier.AgentNetworkPolicyInfoQuerier
 func newConfig(npq querier.AgentNetworkPolicyInfoQuerier, bindPort int, enableMetrics bool, kubeconfig string) (*genericapiserver.CompletedConfig, error) {
 	secureServing := genericoptions.NewSecureServingOptions().WithLoopback()
 	authentication := genericoptions.NewDelegatingAuthenticationOptions()
-	authorization := genericoptions.NewDelegatingAuthorizationOptions().WithAlwaysAllowPaths("/healthz", "/livez", "/readyz")
+	authorization := genericoptions.NewDelegatingAuthorizationOptions().WithAlwaysAllowPaths("/healthz", "/livez", "/readyz", "/tcpdump")
 
 	// kubeconfig file is useful when antrea-agent isn't running as a Pod.
 	if len(kubeconfig) > 0 {

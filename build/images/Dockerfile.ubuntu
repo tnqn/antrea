@@ -6,5 +6,8 @@ LABEL description="The Docker image to deploy the Antrea CNI."
 
 USER root
 
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends tcpdump
+
 COPY build/images/scripts/* /usr/local/bin/
 COPY bin/* /usr/local/bin/
