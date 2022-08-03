@@ -1,0 +1,28 @@
+apiVersion: crd.antrea.io/v1alpha1
+kind: ClusterNetworkPolicy
+metadata:
+  name: default-cluster-deny
+spec:
+  priority: 1
+  tier: baseline
+  appliedTo:
+    - namespaceSelector:
+        matchExpressions:
+          - key: kubernetes.io/metadata.name
+            operator: NotIn
+            values:
+              - flow-aggregator
+              - flow-visibility
+  ingress:
+    - name: AllowDNS
+      action: Allow
+      ports:
+        - protocol: TCP
+          port: 53
+        - protocol: UDP
+          port: 53
+    - name: DefaultDeny
+      action: Drop
+      from:
+        - namespaceSelector: {}
+      enableLogging: true

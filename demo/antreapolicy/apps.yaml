@@ -1,0 +1,127 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: dev1
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: dev2
+---
+apiVersion: v1
+kind: Service
+metadata:
+  namespace: dev1
+  name: nginx
+spec:
+  ports:
+    - port: 80
+      protocol: TCP
+      targetPort: 80
+  selector:
+    app: nginx
+---
+apiVersion: v1
+kind: Service
+metadata:
+  namespace: dev2
+  name: nginx
+spec:
+  ports:
+    - port: 80
+      protocol: TCP
+      targetPort: 80
+  selector:
+    app: nginx
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  namespace: dev1
+  name: client
+spec:
+  selector:
+    matchLabels:
+      app: client
+  template:
+    metadata:
+      labels:
+        app: client
+    spec:
+      containers:
+        - name: client
+          image: qtian/toolbox
+          imagePullPolicy: IfNotPresent
+          command:
+            - sleep
+            - infinity
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  namespace: dev1
+  name: nginx
+  labels:
+    app: nginx
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: nginx
+  template:
+    metadata:
+      labels:
+        app: nginx
+    spec:
+      containers:
+        - name: nginx
+          image: projects.registry.vmware.com/antrea/nginx
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 80
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  namespace: dev2
+  name: client
+spec:
+  selector:
+    matchLabels:
+      app: client
+  template:
+    metadata:
+      labels:
+        app: client
+    spec:
+      containers:
+        - name: client
+          image: qtian/toolbox
+          imagePullPolicy: IfNotPresent
+          command:
+            - sleep
+            - infinity
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  namespace: dev2
+  name: nginx
+  labels:
+    app: nginx
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: nginx
+  template:
+    metadata:
+      labels:
+        app: nginx
+    spec:
+      containers:
+        - name: nginx
+          image: projects.registry.vmware.com/antrea/nginx
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 80

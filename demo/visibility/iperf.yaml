@@ -1,0 +1,79 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: iperf-server1
+spec:
+  selector:
+    matchLabels:
+      app: iperf-server1
+  replicas: 1
+  template:
+    metadata:
+      labels:
+        app: iperf-server1
+    spec:
+      containers:
+        - name: iperf3
+          image: networkstatic/iperf3:latest
+          imagePullPolicy: IfNotPresent
+          command: [iperf3, -s]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: iperf-server2
+spec:
+  selector:
+    matchLabels:
+      app: iperf-server2
+  replicas: 1
+  template:
+    metadata:
+      labels:
+        app: iperf-server2
+    spec:
+      containers:
+        - name: iperf3
+          image: networkstatic/iperf3:latest
+          imagePullPolicy: IfNotPresent
+          command: [iperf3, -s]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: iperf-client1
+spec:
+  selector:
+    matchLabels:
+      app: iperf-client1
+  replicas: 1
+  template:
+    metadata:
+      labels:
+        app: iperf-client1
+    spec:
+      containers:
+        - name: iperf3
+          image: networkstatic/iperf3:latest
+          imagePullPolicy: IfNotPresent
+          command: [iperf3, -s]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: iperf-client2
+spec:
+  selector:
+    matchLabels:
+      app: iperf-client2
+  replicas: 1
+  template:
+    metadata:
+      labels:
+        app: iperf-client2
+    spec:
+      containers:
+        - name: iperf3
+          image: networkstatic/iperf3:latest
+          imagePullPolicy: IfNotPresent
+          command: [iperf3, -s]

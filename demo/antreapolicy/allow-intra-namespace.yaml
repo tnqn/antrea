@@ -1,0 +1,14 @@
+apiVersion: crd.antrea.io/v1alpha1
+kind: ClusterNetworkPolicy
+metadata:
+  name: allow-intra-namespace
+spec:
+  priority: 5
+  tier: securityops
+  appliedTo:
+    - namespaceSelector: {}
+  ingress:
+    - action: Allow
+      from:
+        - namespaces:
+            match: Self

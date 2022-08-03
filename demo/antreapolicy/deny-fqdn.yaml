@@ -1,0 +1,14 @@
+apiVersion: crd.antrea.io/v1alpha1
+kind: ClusterNetworkPolicy
+metadata:
+  name: deny-github-api
+spec:
+  priority: 5
+  tier: securityops
+  appliedTo:
+    - namespaceSelector: {}
+  egress:
+    - action: Drop
+      to:
+        - fqdn: api.github.com
+      enableLogging: true

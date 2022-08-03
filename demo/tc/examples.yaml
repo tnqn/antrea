@@ -1,0 +1,33 @@
+apiVersion: crd.antrea.io/v1alpha2
+kind: TrafficControl
+metadata:
+  name: mirror-web-app
+spec:
+  appliedTo:
+    podSelector:
+      matchLabels:
+        app: web
+  direction: Both
+  action: Mirror
+  destination:
+    name: vxlan-collector
+    tunnel:
+      type: vxlan
+      remoteIP: 10.10.0.2
+---
+apiVersion: crd.antrea.io/v1alpha2
+kind: TrafficControl
+metadata:
+  name: redirect-web-app
+spec:
+  appliedTo:
+    podSelector:
+      matchLabels:
+        app: web
+  direction: Both
+  action: Redirect
+  destination:
+    name: dpi0
+    port:
+      internal: true
+      peerName: dpi1
