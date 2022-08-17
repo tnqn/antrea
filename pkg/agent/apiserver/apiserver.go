@@ -101,7 +101,7 @@ func installAPIGroup(s *genericapiserver.GenericAPIServer, aq agentquerier.Agent
 // New creates an APIServer for running in antrea agent.
 func New(aq agentquerier.AgentQuerier, npq querier.AgentNetworkPolicyInfoQuerier, mq querier.AgentMulticastInfoQuerier, seipq querier.ServiceExternalIPStatusQuerier,
 	bindAddress net.IP, bindPort int, enableMetrics bool, kubeconfig string, cipherSuites []uint16, tlsMinVersion uint16, v4Enabled, v6Enabled bool) (*agentAPIServer, error) {
-	cfg, err := newConfig(npq, bindAddress, bindPort, enableMetrics, kubeconfig)
+	cfg, err := newConfig(aq, npq, bindAddress, bindPort, enableMetrics, kubeconfig)
 	if err != nil {
 		return nil, err
 	}
@@ -118,7 +118,7 @@ func New(aq agentquerier.AgentQuerier, npq querier.AgentNetworkPolicyInfoQuerier
 	return &agentAPIServer{GenericAPIServer: s}, nil
 }
 
-func newConfig(npq querier.AgentNetworkPolicyInfoQuerier, bindAddress net.IP, bindPort int, enableMetrics bool, kubeconfig string) (*genericapiserver.CompletedConfig, error) {
+func newConfig(aq agentquerier.AgentQuerier, npq querier.AgentNetworkPolicyInfoQuerier, bindAddress net.IP, bindPort int, enableMetrics bool, kubeconfig string) (*genericapiserver.CompletedConfig, error) {
 	secureServing := genericoptions.NewSecureServingOptions().WithLoopback()
 	authentication := genericoptions.NewDelegatingAuthenticationOptions()
 	authorization := genericoptions.NewDelegatingAuthorizationOptions().WithAlwaysAllowPaths("/healthz", "/livez", "/readyz")
@@ -164,13 +164,22 @@ func newConfig(npq querier.AgentNetworkPolicyInfoQuerier, bindAddress net.IP, bi
 	}
 	serverConfig.EnableMetrics = enableMetrics
 	// Add readiness probe to check the status of watchers.
-	check := healthz.NamedCheck("watcher", func(_ *http.Request) error {
+	watcherCheck := healthz.NamedCheck("watcher", func(_ *http.Request) error {
 		if npq.GetControllerConnectionStatus() {
 			return nil
 		}
 		return fmt.Errorf("some watchers may not be connected")
 	})
-	serverConfig.ReadyzChecks = append(serverConfig.ReadyzChecks, check)
+	serverConfig.ReadyzChecks = append(serverConfig.ReadyzChecks, watcherCheck)
+	// Add liveness probe to check the connection with OFSwitch.
+	// This helps automatic recovery if some issues cause OFSwitch reconnection to not work properly, e.g. issue #4092.
+	ovsConnCheck := healthz.NamedCheck("ovs", func(_ *http.Request) error {
+		if aq.GetOpenflowClient().IsConnected() {
+			return nil
+		}
+		return fmt.Errorf("disconnected from OFSwitch")
+	})
+	serverConfig.LivezChecks = append(serverConfig.LivezChecks, ovsConnCheck)
 
 	completedServerCfg := serverConfig.Complete(nil)
 	return &completedServerCfg, nil
