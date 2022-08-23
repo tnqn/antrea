@@ -19,7 +19,9 @@ import (
 	"fmt"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"time"
+	"unsafe"
 
 	"antrea.io/libOpenflow/openflow15"
 	"antrea.io/ofnet/ofctrl"
@@ -323,7 +325,7 @@ func (b *OFBridge) PacketRcvd(sw *ofctrl.OFSwitch, packet *ofctrl.PacketIn) {
 func (b *OFBridge) SwitchConnected(sw *ofctrl.OFSwitch) {
 	klog.Infof("OFSwitch is connected: %v", sw.DPID())
 	// initialize tables.
-	b.ofSwitch = sw
+	atomic.StorePointer((*unsafe.Pointer)(unsafe.Pointer(&b.ofSwitch)), unsafe.Pointer(sw))
 	b.ofSwitch.EnableMonitor()
 	b.initialize()
 	go func() {
@@ -429,7 +431,9 @@ func (b *OFBridge) DeleteFlowsByCookie(cookieID, cookieMask uint64) error {
 }
 
 func (b *OFBridge) IsConnected() bool {
-	return b.ofSwitch.IsReady()
+	pointer := atomic.LoadPointer((*unsafe.Pointer)(unsafe.Pointer(&b.ofSwitch)))
+	ofSwitch := (*ofctrl.OFSwitch)(pointer)
+	return ofSwitch.IsReady()
 }
 
 func (b *OFBridge) AddFlowsInBundle(addflows []Flow, modFlows []Flow, delFlows []Flow) error {
@@ -755,7 +759,7 @@ func (b *OFBridge) processTableFeatures(ch chan *openflow15.MultipartReply) {
 	}
 }
 
-func NewOFBridge(br string, mgmtAddr string) Bridge {
+func NewOFBridge(br string, mgmtAddr string) *OFBridge {
 	s := &OFBridge{
 		bridgeName:           br,
 		mgmtAddr:             mgmtAddr,
