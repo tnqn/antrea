@@ -387,6 +387,11 @@ func run(o *Options) error {
 		return fmt.Errorf("error creating new NetworkPolicy controller: %v", err)
 	}
 
+	//var l7NetworkPolicyController *l7networkpolicy.Controller
+	//l7NetworkPolicyController = l7networkpolicy.New()
+	//
+	//go l7NetworkPolicyController.Run(stopCh)
+
 	var egressController *egress.EgressController
 
 	var externalIPPoolController *externalippool.ExternalIPPoolController

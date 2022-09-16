@@ -26,6 +26,8 @@ type Interface interface {
 	ClusterNetworkPolicies() ClusterNetworkPolicyInformer
 	// ExternalNodes returns a ExternalNodeInformer.
 	ExternalNodes() ExternalNodeInformer
+	// L7NetworkPolicies returns a L7NetworkPolicyInformer.
+	L7NetworkPolicies() L7NetworkPolicyInformer
 	// NetworkPolicies returns a NetworkPolicyInformer.
 	NetworkPolicies() NetworkPolicyInformer
 	// SupportBundleCollections returns a SupportBundleCollectionInformer.
@@ -55,6 +57,11 @@ func (v *version) ClusterNetworkPolicies() ClusterNetworkPolicyInformer {
 // ExternalNodes returns a ExternalNodeInformer.
 func (v *version) ExternalNodes() ExternalNodeInformer {
 	return &externalNodeInformer{factory: v.factory, namespace: v.namespace, tweakListOptions: v.tweakListOptions}
+}
+
+// L7NetworkPolicies returns a L7NetworkPolicyInformer.
+func (v *version) L7NetworkPolicies() L7NetworkPolicyInformer {
+	return &l7NetworkPolicyInformer{factory: v.factory, namespace: v.namespace, tweakListOptions: v.tweakListOptions}
 }
 
 // NetworkPolicies returns a NetworkPolicyInformer.

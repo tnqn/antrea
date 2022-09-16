@@ -187,6 +187,7 @@ const (
 	K8sNetworkPolicy           NetworkPolicyType = "K8sNetworkPolicy"
 	AntreaClusterNetworkPolicy NetworkPolicyType = "AntreaClusterNetworkPolicy"
 	AntreaNetworkPolicy        NetworkPolicyType = "AntreaNetworkPolicy"
+	AntreaL7NetworkPolicy      NetworkPolicyType = "AntreaL7NetworkPolicy"
 )
 
 type NetworkPolicyReference struct {
@@ -274,6 +275,8 @@ const (
 	ProtocolICMP Protocol = "ICMP"
 
 	ProtocolIGMP Protocol = "IGMP"
+
+	ProtocolHTTP Protocol = "HTTP"
 )
 
 // Service describes a port to allow traffic on.
@@ -299,6 +302,10 @@ type Service struct {
 	// IGMPType and GroupAddress can only be specified when the Protocol is IGMP.
 	IGMPType     *int32
 	GroupAddress string
+
+	Host   string
+	Method string
+	Path   string
 }
 
 // NetworkPolicyPeer describes a peer of NetworkPolicyRules.

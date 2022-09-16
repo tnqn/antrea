@@ -321,9 +321,9 @@ endif
 build-ubuntu:
 	@echo "===> Building Antrea bins and antrea/antrea-ubuntu Docker image <==="
 ifneq ($(NO_PULL),)
-	docker build -t antrea/antrea-ubuntu:$(DOCKER_IMG_VERSION) -f build/images/Dockerfile.build.ubuntu $(DOCKER_BUILD_ARGS) .
+	docker build --rm -t antrea/antrea-ubuntu:$(DOCKER_IMG_VERSION) -f build/images/Dockerfile.build.ubuntu $(DOCKER_BUILD_ARGS) .
 else
-	docker build --pull -t antrea/antrea-ubuntu:$(DOCKER_IMG_VERSION) -f build/images/Dockerfile.build.ubuntu $(DOCKER_BUILD_ARGS) .
+	docker build --rm --pull -t antrea/antrea-ubuntu:$(DOCKER_IMG_VERSION) -f build/images/Dockerfile.build.ubuntu $(DOCKER_BUILD_ARGS) .
 endif
 	docker tag antrea/antrea-ubuntu:$(DOCKER_IMG_VERSION) antrea/antrea-ubuntu
 	docker tag antrea/antrea-ubuntu:$(DOCKER_IMG_VERSION) projects.registry.vmware.com/antrea/antrea-ubuntu

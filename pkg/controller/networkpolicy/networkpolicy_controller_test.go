@@ -119,6 +119,7 @@ func newController(objects ...runtime.Object) (*fake.Clientset, *networkPolicyCo
 		informerFactory.Core().V1().Nodes(),
 		crdInformerFactory.Crd().V1alpha1().ClusterNetworkPolicies(),
 		crdInformerFactory.Crd().V1alpha1().NetworkPolicies(),
+		crdInformerFactory.Crd().V1alpha1().L7NetworkPolicies(),
 		crdInformerFactory.Crd().V1alpha1().Tiers(),
 		cgInformer,
 		gInformer,

@@ -3872,6 +3872,7 @@ rules:
     resources:
       - clusternetworkpolicies
       - networkpolicies
+      - l7networkpolicies
     verbs:
       - get
       - watch

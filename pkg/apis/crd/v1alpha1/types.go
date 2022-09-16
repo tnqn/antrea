@@ -833,3 +833,125 @@ type BundleServerAuthConfiguration struct {
 	// AuthSecret is a Secret reference which stores the authentication value.
 	AuthSecret *v1.SecretReference `json:"authSecret"`
 }
+
+// +genclient
+// +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
+
+type L7NetworkPolicy struct {
+	metav1.TypeMeta `json:",inline"`
+	// Standard metadata of the object.
+	metav1.ObjectMeta `json:"metadata,omitempty"`
+
+	// Specification of the desired behavior of L7NetworkPolicy.
+	Spec L7NetworkPolicySpec `json:"spec"`
+}
+
+// +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
+
+type L7NetworkPolicyList struct {
+	metav1.TypeMeta `json:",inline"`
+	// +optional
+	metav1.ListMeta `json:"metadata,omitempty"`
+
+	Items []L7NetworkPolicy `json:"items"`
+}
+
+// L7NetworkPolicySpec defines the desired state for L7NetworkPolicy.
+type L7NetworkPolicySpec struct {
+	// Select workloads on which the rules will be applied to. Cannot be set in
+	// conjunction with AppliedTo in each rule.
+	// +optional
+	AppliedTo []NetworkPolicyPeer `json:"appliedTo,omitempty"`
+	// Set of ingress rules evaluated based on the order in which they are set.
+	// Currently Ingress rule supports setting the `From` field but not the `To`
+	// field within a Rule.
+	// +optional
+	Ingress []L7Rule `json:"ingress,omitempty"`
+	// Set of egress rules evaluated based on the order in which they are set.
+	// Currently Egress rule supports setting the `To` field but not the `From`
+	// field within a Rule.
+	// +optional
+	Egress []L7Rule `json:"egress,omitempty"`
+}
+
+type L7Rule struct {
+	// Set of protocols matched by the rule. If this field and Ports are unset or
+	// empty, this rule matches all protocols supported.
+	// +optional
+	Protocols []L7Protocol `json:"protocols,omitempty"`
+	// Rule is matched if traffic originates from workloads selected by
+	// this field. If this field is empty, this rule matches all sources.
+	// +optional
+	From []NetworkPolicyPeer `json:"from,omitempty"`
+	// Rule is matched if traffic is intended for workloads selected by
+	// this field. If this field is empty, this rule matches all destinations.
+	// +optional
+	To []NetworkPolicyPeer `json:"to,omitempty"`
+	// Name describes the intention of this rule.
+	// Name should be unique within the policy.
+	// +optional
+	Name string `json:"name,omitempty"`
+}
+
+type L7Protocol struct {
+	HTTP *HTTPProtocol `json:"http,omitempty"`
+	DNS  *DNSProtocol  `json:"dns,omitempty"`
+}
+
+// HTTPProtocol matches HTTP requests with specific host, method, and path. All
+// fields could be used alone or together. If all fields are not provided, this
+// matches all HTTP requests.
+type HTTPProtocol struct {
+	Host   string `json:"host,omitempty"`
+	Method string `json:"method,omitempty"`
+	Path   string `json:"path,omitempty"`
+}
+
+// DNSProtocol matches DNS requests with specific query. If query is not
+// provided, this matches all DNS requests.
+type DNSProtocol struct {
+	Query string `json:"query,omitempty"`
+}
+
+/*
+apiVersion: crd.antrea.io/v1alpha1
+kind: L7NetworkPolicy
+metadata:
+  name: l7policy
+spec:
+  appliedTo:
+  - podSelector:
+      matchLabels:
+        app: nginx
+  ingress:
+  - from:
+    - podSelector:
+        matchLabels:
+          http: "true"
+    protocols:
+    - http:
+        path: /docs
+*/
+
+/*
+apiVersion: crd.antrea.io/v1alpha1
+kind: L7NetworkPolicy
+metadata:
+  name: allow-access-docs-and-blog
+spec:
+  appliedTo:
+    podSelector:
+      matchLabels:
+        app: web
+  ingress:
+  - protocols:
+    - http:
+        path: /docs
+        method: GET
+    - http:
+        path: /blog
+        method: GET
+    from:
+    - ipBlock:
+        cidr: 192.168.0.0/16
+*/

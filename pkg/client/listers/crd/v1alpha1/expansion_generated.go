@@ -28,6 +28,14 @@ type ExternalNodeListerExpansion interface{}
 // ExternalNodeNamespaceLister.
 type ExternalNodeNamespaceListerExpansion interface{}
 
+// L7NetworkPolicyListerExpansion allows custom methods to be added to
+// L7NetworkPolicyLister.
+type L7NetworkPolicyListerExpansion interface{}
+
+// L7NetworkPolicyNamespaceListerExpansion allows custom methods to be added to
+// L7NetworkPolicyNamespaceLister.
+type L7NetworkPolicyNamespaceListerExpansion interface{}
+
 // NetworkPolicyListerExpansion allows custom methods to be added to
 // NetworkPolicyLister.
 type NetworkPolicyListerExpansion interface{}

@@ -400,6 +400,12 @@ message Service {
   optional int32 igmpType = 6;
 
   optional string groupAddress = 7;
+
+  optional string host = 8;
+
+  optional string method = 9;
+
+  optional string path = 10;
 }
 
 // ServiceReference represents reference to a v1.Service.

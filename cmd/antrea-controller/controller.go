@@ -127,6 +127,7 @@ func run(o *Options) error {
 	cnpInformer := crdInformerFactory.Crd().V1alpha1().ClusterNetworkPolicies()
 	eeInformer := crdInformerFactory.Crd().V1alpha2().ExternalEntities()
 	anpInformer := crdInformerFactory.Crd().V1alpha1().NetworkPolicies()
+	l7npInformer := crdInformerFactory.Crd().V1alpha1().L7NetworkPolicies()
 	tierInformer := crdInformerFactory.Crd().V1alpha1().Tiers()
 	tfInformer := crdInformerFactory.Crd().V1alpha1().Traceflows()
 	cgInformer := crdInformerFactory.Crd().V1alpha3().ClusterGroups()
@@ -159,6 +160,7 @@ func run(o *Options) error {
 		nodeInformer,
 		cnpInformer,
 		anpInformer,
+		l7npInformer,
 		tierInformer,
 		cgInformer,
 		grpInformer,

@@ -176,6 +176,13 @@ type NetworkPolicyController struct {
 	// anpListerSynced is a function which returns true if the AntreaNetworkPolicies shared informer has been synced at least once.
 	anpListerSynced cache.InformerSynced
 
+	l7networkPolicyInformer secinformers.L7NetworkPolicyInformer
+	// networkPolicyLister is able to list/get Network Policies and is populated by the shared informer passed to
+	// NewNetworkPolicyController.
+	l7NetworkPolicyLister seclisters.L7NetworkPolicyLister
+	// networkPolicyListerSynced is a function which returns true if the Network Policy shared informer has been synced at least once.
+	l7NetworkPolicyListerSynced cache.InformerSynced
+
 	tierInformer secinformers.TierInformer
 	// tierLister is able to list/get Tiers and is populated by the shared informer passed to
 	// NewNetworkPolicyController.
@@ -376,6 +383,7 @@ func NewNetworkPolicyController(kubeClient clientset.Interface,
 	nodeInformer coreinformers.NodeInformer,
 	cnpInformer secinformers.ClusterNetworkPolicyInformer,
 	anpInformer secinformers.NetworkPolicyInformer,
+	l7npInformer secinformers.L7NetworkPolicyInformer,
 	tierInformer secinformers.TierInformer,
 	cgInformer crdv1a3informers.ClusterGroupInformer,
 	grpInformer crdv1a3informers.GroupInformer,
@@ -429,6 +437,9 @@ func NewNetworkPolicyController(kubeClient clientset.Interface,
 		n.anpInformer = anpInformer
 		n.anpLister = anpInformer.Lister()
 		n.anpListerSynced = anpInformer.Informer().HasSynced
+		n.l7networkPolicyInformer = l7npInformer
+		n.l7NetworkPolicyLister = l7npInformer.Lister()
+		n.l7NetworkPolicyListerSynced = l7npInformer.Informer().HasSynced
 		n.tierInformer = tierInformer
 		n.tierLister = tierInformer.Lister()
 		n.tierListerSynced = tierInformer.Informer().HasSynced
@@ -480,6 +491,14 @@ func NewNetworkPolicyController(kubeClient clientset.Interface,
 				AddFunc:    n.addANP,
 				UpdateFunc: n.updateANP,
 				DeleteFunc: n.deleteANP,
+			},
+			resyncPeriod,
+		)
+		l7npInformer.Informer().AddEventHandlerWithResyncPeriod(
+			cache.ResourceEventHandlerFuncs{
+				AddFunc:    n.addL7NP,
+				UpdateFunc: n.updateL7NP,
+				DeleteFunc: n.deleteL7NP,
 			},
 			resyncPeriod,
 		)
@@ -1265,7 +1284,7 @@ func (n *NetworkPolicyController) syncAppliedToGroup(key string) error {
 				if podSet == nil {
 					podSet = controlplane.GroupMemberSet{}
 				}
-				podSet.Insert(podToGroupMember(pod, false))
+				podSet.Insert(podToGroupMember(pod, true))
 				// Update the Pod references by Node.
 				memberSetByNode[pod.Spec.NodeName] = podSet
 				// Update the NodeNames in order to set the SpanMeta for AppliedToGroup.
@@ -1422,6 +1441,13 @@ func (n *NetworkPolicyController) syncInternalNetworkPolicy(key *controlplane.Ne
 			return nil
 		}
 		newInternalNetworkPolicy, newAppliedToGroups, newAddressGroups = n.processNetworkPolicy(knp)
+	case controlplane.AntreaL7NetworkPolicy:
+		l7np, err := n.l7NetworkPolicyLister.L7NetworkPolicies(key.Namespace).Get(key.Name)
+		if err != nil {
+			n.deleteInternalNetworkPolicy(internalNetworkPolicyName)
+			return nil
+		}
+		newInternalNetworkPolicy, newAppliedToGroups, newAddressGroups = n.processL7NetworkPolicy(l7np)
 	}
 
 	newNodeNames, err := func() (sets.String, error) {

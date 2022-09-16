@@ -28,6 +28,7 @@ type CrdV1alpha1Interface interface {
 	RESTClient() rest.Interface
 	ClusterNetworkPoliciesGetter
 	ExternalNodesGetter
+	L7NetworkPoliciesGetter
 	NetworkPoliciesGetter
 	SupportBundleCollectionsGetter
 	TiersGetter
@@ -45,6 +46,10 @@ func (c *CrdV1alpha1Client) ClusterNetworkPolicies() ClusterNetworkPolicyInterfa
 
 func (c *CrdV1alpha1Client) ExternalNodes(namespace string) ExternalNodeInterface {
 	return newExternalNodes(c, namespace)
+}
+
+func (c *CrdV1alpha1Client) L7NetworkPolicies(namespace string) L7NetworkPolicyInterface {
+	return newL7NetworkPolicies(c, namespace)
 }
 
 func (c *CrdV1alpha1Client) NetworkPolicies(namespace string) NetworkPolicyInterface {

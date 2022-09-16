@@ -15,6 +15,7 @@
 package networkpolicy
 
 import (
+	"antrea.io/antrea/pkg/agent/controller/l7networkpolicy/suricata"
 	"context"
 	"fmt"
 	"net"
@@ -55,6 +56,14 @@ const (
 	// services to the workloads that have FQDN policy rules applied.
 	dnsInterceptRuleID = uint32(1)
 )
+
+type RuleEnforcer interface {
+	Run(stopCh <-chan struct{})
+
+	AddRule(name string, from v1beta2.GroupMemberSet, target v1beta2.GroupMemberSet, services []v1beta2.Service) error
+
+	DeleteRule(name string) error
+}
 
 var emptyWatch = watch.NewEmptyWatch()
 
@@ -97,6 +106,8 @@ type Controller struct {
 	// reconciler provides interfaces to reconcile the desired state of
 	// NetworkPolicy rules with the actual state of Openflow entries.
 	reconciler Reconciler
+	// TBD
+	l7RuleEnforcer RuleEnforcer
 	// ofClient registers packetin for Antrea Policy logging.
 	ofClient           openflow.Client
 	antreaPolicyLogger *AntreaPolicyLogger
@@ -136,6 +147,7 @@ func NewNetworkPolicyController(antreaClientGetter agent.AntreaClientProvider,
 	v6Enabled bool,
 	gwPort, tunPort uint32) (*Controller, error) {
 	idAllocator := newIDAllocator(asyncRuleDeleteInterval, dnsInterceptRuleID)
+	ruleEnforcer := suricata.NewEnforcer()
 	c := &Controller{
 		antreaClientProvider: antreaClientGetter,
 		queue:                workqueue.NewNamedRateLimitingQueue(workqueue.NewItemExponentialFailureRateLimiter(minRetryDelay, maxRetryDelay), "networkpolicyrule"),
@@ -148,6 +160,7 @@ func NewNetworkPolicyController(antreaClientGetter agent.AntreaClientProvider,
 		loggingEnabled:       loggingEnabled,
 		gwPort:               gwPort,
 		tunPort:              tunPort,
+		l7RuleEnforcer:       ruleEnforcer,
 	}
 
 	if antreaPolicyEnabled {
@@ -489,6 +502,8 @@ func (c *Controller) Run(stopCh <-chan struct{}) {
 		go c.statusManager.Run(stopCh)
 	}
 
+	go c.l7RuleEnforcer.Run(stopCh)
+
 	<-stopCh
 }
 
@@ -593,6 +608,11 @@ func (c *Controller) syncRule(key string) error {
 	rule, effective, realizable := c.ruleCache.GetCompletedRule(key)
 	if !effective {
 		klog.V(2).InfoS("Rule was not effective, removing its flows", "ruleID", key)
+		err := c.l7RuleEnforcer.DeleteRule(key)
+		if err != nil {
+			return err
+		}
+		return nil
 		if err := c.reconciler.Forget(key); err != nil {
 			return err
 		}
@@ -607,6 +627,13 @@ func (c *Controller) syncRule(key string) error {
 	// and queued again when we receive the missing group it missed.
 	if !realizable {
 		klog.V(2).InfoS("Rule is not realizable, skipping", "ruleID", key)
+		return nil
+	}
+	if rule.SourceRef.Type == v1beta2.AntreaL7NetworkPolicy {
+		err := c.l7RuleEnforcer.AddRule(key, rule.FromAddresses, rule.TargetMembers, rule.Services)
+		if err != nil {
+			return err
+		}
 		return nil
 	}
 	err := c.reconciler.Reconcile(rule)
@@ -644,7 +671,15 @@ func (c *Controller) syncRules(keys []string) error {
 		} else if !realizable {
 			klog.Errorf("Rule %s is effective but not realizable", key)
 		} else {
-			allRules = append(allRules, rule)
+			if rule.SourceRef.Type == v1beta2.AntreaL7NetworkPolicy {
+				err := c.l7RuleEnforcer.AddRule(rule.Name, rule.FromAddresses, rule.TargetMembers, rule.Services)
+				if err != nil {
+					return err
+				}
+				return nil
+			} else {
+				allRules = append(allRules, rule)
+			}
 		}
 	}
 	if err := c.reconciler.BatchReconcile(allRules); err != nil {
