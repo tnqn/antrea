@@ -834,3 +834,55 @@ func TestUpdateEgressStatus(t *testing.T) {
 		})
 	}
 }
+
+func TestAddUpdateDeleteEgress(t *testing.T) {
+	c := newFakeController(t, []runtime.Object{})
+
+	c.addEgress(&crdv1a2.Egress{
+		ObjectMeta: metav1.ObjectMeta{Name: "egressA", UID: "uidA"},
+	})
+	require.Equal(t, 0, c.queue.Len())
+
+	c.addEgress(&crdv1a2.Egress{
+		ObjectMeta: metav1.ObjectMeta{Name: "egressB", UID: "uidB"},
+		Spec:       crdv1a2.EgressSpec{EgressIP: fakeLocalEgressIP1},
+	})
+	require.Equal(t, 1, c.queue.Len())
+	item, _ := c.queue.Get()
+	assert.Equal(t, "egressB", item)
+	c.queue.Done(item)
+
+	c.updateEgress(&crdv1a2.Egress{
+		ObjectMeta: metav1.ObjectMeta{Name: "egressB", UID: "uidB"},
+		Spec:       crdv1a2.EgressSpec{EgressIP: fakeLocalEgressIP1},
+	}, &crdv1a2.Egress{
+		ObjectMeta: metav1.ObjectMeta{Name: "egressB", UID: "uidB"},
+		Spec:       crdv1a2.EgressSpec{EgressIP: fakeLocalEgressIP1},
+		Status:     crdv1a2.EgressStatus{EgressNode: "otherNode"},
+	})
+	require.Equal(t, 1, c.queue.Len())
+	item, _ = c.queue.Get()
+	assert.Equal(t, "egressB", item)
+	c.queue.Done(item)
+
+	c.updateEgress(&crdv1a2.Egress{
+		ObjectMeta: metav1.ObjectMeta{Name: "egressB", UID: "uidB"},
+		Spec:       crdv1a2.EgressSpec{EgressIP: fakeLocalEgressIP1},
+		Status:     crdv1a2.EgressStatus{EgressNode: "otherNode"},
+	}, &crdv1a2.Egress{
+		ObjectMeta: metav1.ObjectMeta{Name: "egressB", UID: "uidB"},
+		Spec:       crdv1a2.EgressSpec{EgressIP: fakeLocalEgressIP1},
+		Status:     crdv1a2.EgressStatus{EgressNode: fakeNode},
+	})
+	require.Equal(t, 0, c.queue.Len())
+
+	c.deleteEgress(&crdv1a2.Egress{
+		ObjectMeta: metav1.ObjectMeta{Name: "egressB", UID: "uidB"},
+		Spec:       crdv1a2.EgressSpec{EgressIP: fakeLocalEgressIP1},
+		Status:     crdv1a2.EgressStatus{EgressNode: fakeNode},
+	})
+	require.Equal(t, 1, c.queue.Len())
+	item, _ = c.queue.Get()
+	assert.Equal(t, "egressB", item)
+	c.queue.Done(item)
+}
