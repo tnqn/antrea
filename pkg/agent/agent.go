@@ -23,6 +23,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/containernetworking/plugins/pkg/ip"
@@ -77,6 +78,12 @@ var (
 
 	// getTransportIPNetDeviceByName is meant to be overridden for testing.
 	getTransportIPNetDeviceByName = GetTransportIPNetDeviceByName
+
+	setLinkUp = util.SetLinkUp
+
+	configureLinkAddresses = util.ConfigureLinkAddresses
+
+	deleteStaleFlowsDelay = 10 * time.Second
 )
 
 // otherConfigKeysForIPsecCertificates are configurations added to OVS bridge when AuthenticationMode is "cert" and
@@ -89,6 +96,7 @@ type Initializer struct {
 	crdClient             versioned.Interface
 	ovsBridgeClient       ovsconfig.OVSBridgeClient
 	ofClient              openflow.Client
+	ovsctlClient          ovsctl.OVSCtlClient
 	routeClient           route.Interface
 	wireGuardClient       wireguard.Interface
 	ifaceStore            interfacestore.InterfaceStore
@@ -109,6 +117,9 @@ type Initializer struct {
 	stopCh                <-chan struct{}
 	nodeType              config.NodeType
 	externalNodeNamespace string
+
+	staleFlowsDeleted uint32
+	flowsReplayed     uint32
 }
 
 func NewInitializer(
@@ -117,6 +128,7 @@ func NewInitializer(
 	ovsBridgeClient ovsconfig.OVSBridgeClient,
 	ofClient openflow.Client,
 	routeClient route.Interface,
+	ovsctlClient ovsctl.OVSCtlClient,
 	ifaceStore interfacestore.InterfaceStore,
 	ovsBridge string,
 	hostGateway string,
@@ -141,6 +153,7 @@ func NewInitializer(
 		ofClient:              ofClient,
 		routeClient:           routeClient,
 		ovsBridge:             ovsBridge,
+		ovsctlClient:          ovsctlClient,
 		hostGateway:           hostGateway,
 		mtu:                   mtu,
 		networkConfig:         networkConfig,
@@ -202,7 +215,7 @@ func (i *Initializer) setupOVSBridge() error {
 }
 
 func (i *Initializer) validateSupportedDPFeatures() error {
-	gotFeatures, err := ovsctl.NewClient(i.ovsBridge).GetDPFeatures()
+	gotFeatures, err := i.ovsctlClient.GetDPFeatures()
 	if err != nil {
 		return err
 	}
@@ -527,13 +540,14 @@ func (i *Initializer) initOpenFlowPipeline() error {
 		//  full sync in agent networkpolicy controller is complete. This would signal NP
 		//  flows have been synced once. Other mechanisms are still needed for node flows
 		//  fullSync check.
-		time.Sleep(10 * time.Second)
+		time.Sleep(deleteStaleFlowsDelay)
 		klog.Info("Deleting stale flows from previous round if any")
 		if err := i.ofClient.DeleteStaleFlows(); err != nil {
 			klog.Errorf("Error when deleting stale flows from previous round: %v", err)
 			return
 		}
 		persistRoundNum(roundInfo.RoundNum, i.ovsBridgeClient, 1*time.Second, maxRetryForRoundNumSave)
+		atomic.StoreUint32(&i.staleFlowsDeleted, 1)
 	}()
 
 	go func() {
@@ -560,6 +574,7 @@ func (i *Initializer) initOpenFlowPipeline() error {
 			if err != nil {
 				klog.Errorf("Failed to clean up flow-restore-wait config: %v", err)
 			}
+			atomic.AddUint32(&i.flowsReplayed, 1)
 		}
 	}()
 
@@ -679,7 +694,7 @@ func (i *Initializer) configureGatewayInterface(gatewayIface *interfacestore.Int
 	// Host link might not be queried at once after creating OVS internal port; retry max 5 times with 1s
 	// delay each time to ensure the link is ready.
 	for retry := 0; retry < maxRetryForHostLink; retry++ {
-		gwMAC, gwLinkIdx, err = util.SetLinkUp(i.hostGateway)
+		gwMAC, gwLinkIdx, err = setLinkUp(i.hostGateway)
 		if err == nil {
 			break
 		}
@@ -1146,16 +1161,18 @@ func (i *Initializer) allocateGatewayAddresses(localSubnets []*net.IPNet, gatewa
 	// (i.e. portExists is false). Indeed, it may be possible for the interface to exist even if the OVS bridge does
 	// not exist.
 	// Configure any missing IP address on the interface. Remove any extra IP address that may exist.
-	if err := util.ConfigureLinkAddresses(i.nodeConfig.GatewayConfig.LinkIndex, gwIPs); err != nil {
+	if err := configureLinkAddresses(i.nodeConfig.GatewayConfig.LinkIndex, gwIPs); err != nil {
 		return err
 	}
 	// Periodically check whether IP configuration of the gateway is correct.
 	// Terminate when stopCh is closed.
-	go wait.Until(func() {
-		if err := util.ConfigureLinkAddresses(i.nodeConfig.GatewayConfig.LinkIndex, gwIPs); err != nil {
+	// Use PollUntil instead of Until to avoid an immediate reconfiguration.
+	go wait.PollUntil(60*time.Second, func() (bool, error) {
+		if err := configureLinkAddresses(i.nodeConfig.GatewayConfig.LinkIndex, gwIPs); err != nil {
 			klog.Errorf("Failed to check IP configuration of the gateway: %v", err)
 		}
-	}, 60*time.Second, i.stopCh)
+		return false, nil
+	}, i.stopCh)
 
 	for _, gwIP := range gwIPs {
 		if gwIP.IP.To4() != nil {

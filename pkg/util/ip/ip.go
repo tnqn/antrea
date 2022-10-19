@@ -195,6 +195,14 @@ func MustParseCIDR(cidr string) *net.IPNet {
 	return ipNet
 }
 
+func MustParseMAC(mac string) net.HardwareAddr {
+	hw, err := net.ParseMAC(mac)
+	if err != nil {
+		panic(fmt.Errorf("cannot parse '%v': %v", mac, err))
+	}
+	return hw
+}
+
 func MustIPv6(s string) net.IP {
 	ip := net.ParseIP(s)
 	if !utilnet.IsIPv6(ip) {

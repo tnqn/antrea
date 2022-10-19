@@ -150,6 +150,7 @@ func run(o *Options) error {
 		features.DefaultFeatureGate.Enabled(features.TrafficControl),
 		features.DefaultFeatureGate.Enabled(features.Multicluster),
 	)
+	ovsctlClient := ovsctl.NewClient(o.config.OVSBridge)
 
 	var serviceCIDRNet *net.IPNet
 	if o.nodeType == config.K8sNode {
@@ -234,6 +235,7 @@ func run(o *Options) error {
 		ovsBridgeClient,
 		ofClient,
 		routeClient,
+		ovsctlClient,
 		ifaceStore,
 		o.config.OVSBridge,
 		o.config.HostGateway,
@@ -645,7 +647,7 @@ func run(o *Options) error {
 		tcController := trafficcontrol.NewTrafficControlController(ofClient,
 			ifaceStore,
 			ovsBridgeClient,
-			ovsctl.NewClient(o.config.OVSBridge),
+			ovsctlClient,
 			trafficControlInformer,
 			localPodInformer,
 			namespaceInformer,
