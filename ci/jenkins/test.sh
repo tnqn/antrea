@@ -619,6 +619,8 @@ function deliver_antrea {
     echo "====== Delivering Antrea to all Nodes ======"
     docker save -o antrea-ubuntu.tar antrea/antrea-ubuntu:latest
     docker save -o flow-aggregator.tar antrea/flow-aggregator:latest
+    docker pull harbor-repo.vmware.com/dockerhub-proxy-cache/antrea/perftool
+    docker save -o perftool.tar harbor-repo.vmware.com/dockerhub-proxy-cache/antrea/perftool
 
     if [[ $TESTBED_TYPE == "flexible-ipam" ]]; then
         kubectl get nodes -o wide --no-headers=true | awk '{print $6}' | while read IP; do
@@ -633,7 +635,8 @@ function deliver_antrea {
         kubectl get nodes -o wide --no-headers=true | awk '{print $6}' | while read IP; do
             scp -q -o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no -i "${WORKDIR}/.ssh/id_rsa" antrea-ubuntu.tar jenkins@${IP}:${DEFAULT_WORKDIR}/antrea-ubuntu.tar
             scp -q -o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no -i "${WORKDIR}/.ssh/id_rsa" flow-aggregator.tar jenkins@${IP}:${DEFAULT_WORKDIR}/flow-aggregator.tar
-            ssh -o StrictHostKeyChecking=no -i "${WORKDIR}/.ssh/id_rsa" -n jenkins@${IP} "${CLEAN_STALE_IMAGES_CONTAINERD};ctr -n=k8s.io images import ${DEFAULT_WORKDIR}/antrea-ubuntu.tar; ctr -n=k8s.io images import ${DEFAULT_WORKDIR}/flow-aggregator.tar" || true
+            scp -q -o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no -i "${WORKDIR}/.ssh/id_rsa" perftool.tar jenkins@${IP}:${DEFAULT_WORKDIR}/perftool.tar
+            ssh -o StrictHostKeyChecking=no -i "${WORKDIR}/.ssh/id_rsa" -n jenkins@${IP} "sudo chmod 777 /run/containerd/containerd.sock; ${CLEAN_STALE_IMAGES_CONTAINERD}; sudo ctr -n=k8s.io images import ${DEFAULT_WORKDIR}/antrea-ubuntu.tar; sudo ctr -n=k8s.io images import ${DEFAULT_WORKDIR}/flow-aggregator.tar; sudo ctr -n=k8s.io images import ${DEFAULT_WORKDIR}/perftool.tar" || true
         done
     else
         kubectl get nodes -o wide --no-headers=true | awk -v role="$CONTROL_PLANE_NODE_ROLE" '$3 !~ role {print $6}' | while read IP; do
@@ -1049,6 +1052,10 @@ if [[ $TESTCASE =~ "multicast" ]]; then
 fi
 
 clean_tmp
+echo "===== Clean up previous docker images and containers ====="
+docker ps -a | grep Exited | awk '{print $1}' | xargs -r docker rm || true
+docker images | grep antrea | grep -Ev 'antrea/ubuntu|antrea/golang|antrea/sonobuoy' | awk '{print $1":"$2}' | xargs -r docker rmi || true
+docker images | grep none | awk '{print $3}' | xargs -r docker rmi || true
 if [[ ${TESTCASE} == "windows-install-ovs" ]]; then
     run_install_windows_ovs
     if [[ ${TEST_FAILURE} == true ]]; then
