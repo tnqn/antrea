@@ -424,6 +424,18 @@ message Service {
   optional int32 igmpType = 6;
 
   optional string groupAddress = 7;
+
+  // The fields are specific to the HTTP protocol.
+  // Host represents the hostname present in the URI or the HTTP Host header to match.
+  // It does not contain the port associated with the host.
+  optional string host = 8;
+
+  // Method represents the HTTP method to match.
+  // It could be GET, POST, PUT, HEAD, DELETE, TRACE, OPTIONS, CONNECT and PATCH.
+  optional string method = 9;
+
+  // Path represents the URI path to match (Ex. "/index.html", "/admin").
+  optional string path = 10;
 }
 
 // ServiceReference represents reference to a v1.Service.

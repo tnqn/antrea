@@ -272,6 +272,8 @@ const (
 	ProtocolICMP Protocol = "ICMP"
 
 	ProtocolIGMP Protocol = "IGMP"
+
+	ProtocolHTTP Protocol = "HTTP"
 )
 
 // Service describes a port to allow traffic on.
@@ -298,6 +300,16 @@ type Service struct {
 	// +optional
 	IGMPType     *int32 `json:"igmpType,omitempty" protobuf:"varint,6,opt,name=igmpType"`
 	GroupAddress string `json:"groupAddress,omitempty" protobuf:"bytes,7,opt,name=groupAddress"`
+
+	// The fields are specific to the HTTP protocol.
+	// Host represents the hostname present in the URI or the HTTP Host header to match.
+	// It does not contain the port associated with the host.
+	Host string `json:"host,omitempty" protobuf:"bytes,8,opt,name=host"`
+	// Method represents the HTTP method to match.
+	// It could be GET, POST, PUT, HEAD, DELETE, TRACE, OPTIONS, CONNECT and PATCH.
+	Method string `json:"method,omitempty" protobuf:"bytes,9,opt,name=method"`
+	// Path represents the URI path to match (Ex. "/index.html", "/admin").
+	Path string `json:"path,omitempty" protobuf:"bytes,10,opt,name=path"`
 }
 
 // NetworkPolicyPeer describes a peer of NetworkPolicyRules.

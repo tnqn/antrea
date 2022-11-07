@@ -34,6 +34,10 @@ func (c *FakeCrdV1alpha1) ExternalNodes(namespace string) v1alpha1.ExternalNodeI
 	return &FakeExternalNodes{c, namespace}
 }
 
+func (c *FakeCrdV1alpha1) L7NetworkPolicies(namespace string) v1alpha1.L7NetworkPolicyInterface {
+	return &FakeL7NetworkPolicies{c, namespace}
+}
+
 func (c *FakeCrdV1alpha1) NetworkPolicies(namespace string) v1alpha1.NetworkPolicyInterface {
 	return &FakeNetworkPolicies{c, namespace}
 }

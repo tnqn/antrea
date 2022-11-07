@@ -868,3 +868,90 @@ type BundleServerAuthConfiguration struct {
 	// AuthSecret is a Secret reference which stores the authentication value.
 	AuthSecret *v1.SecretReference `json:"authSecret"`
 }
+
+// +genclient
+// +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
+
+// L7NetworkPolicy describes what application-level traffic is allowed for a set of Pods.
+type L7NetworkPolicy struct {
+	metav1.TypeMeta `json:",inline"`
+	// Standard metadata of the object.
+	metav1.ObjectMeta `json:"metadata,omitempty"`
+
+	// Specification of the desired behavior of L7NetworkPolicy.
+	Spec L7NetworkPolicySpec `json:"spec"`
+}
+
+// +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
+
+type L7NetworkPolicyList struct {
+	metav1.TypeMeta `json:",inline"`
+	// +optional
+	metav1.ListMeta `json:"metadata,omitempty"`
+
+	Items []L7NetworkPolicy `json:"items"`
+}
+
+// ProtocolMismatchPolicyType defines the authentication type to access the BundleFileServer.
+type ProtocolMismatchPolicyType string
+
+const (
+	Drop   ProtocolMismatchPolicyType = "Drop"
+	Ignore ProtocolMismatchPolicyType = "Ignore"
+)
+
+// L7NetworkPolicySpec defines the desired state for L7NetworkPolicy.
+type L7NetworkPolicySpec struct {
+	// Select workloads on which the rules will be applied to.
+	// +optional
+	AppliedTo []AppliedTo `json:"appliedTo,omitempty"`
+	// ProtocolMismatchPolicy defines how traffic of unmatched protocols is handled -
+	// allowed values are Drop or Ignore. Defaults to Drop.
+	// +optional
+	ProtocolMismatchPolicy *ProtocolMismatchPolicyType `json:"protocolMismatchPolicy,omitempty"`
+	// Set of ingress rules. Ingress rule supports setting the `From` field but
+	// not the `To` field within a Rule.
+	// +optional
+	Ingress []L7Rule `json:"ingress,omitempty"`
+	// Set of egress rules. Egress rule supports setting the `To` field but not
+	// the `From` field within a Rule.
+	// +optional
+	Egress []L7Rule `json:"egress,omitempty"`
+}
+
+type L7Rule struct {
+	// Set of protocols matched by the rule. If this field and Ports are unset or
+	// empty, this rule matches all protocols supported.
+	// +optional
+	Protocols []L7Protocol `json:"protocols,omitempty"`
+	// Rule is matched if traffic originates from workloads selected by
+	// this field. If this field is empty, this rule matches all sources.
+	// +optional
+	From []NetworkPolicyPeer `json:"from,omitempty"`
+	// Rule is matched if traffic is intended for workloads selected by
+	// this field. If this field is empty, this rule matches all destinations.
+	// +optional
+	To []NetworkPolicyPeer `json:"to,omitempty"`
+	// Name describes the intention of this rule.
+	// Name should be unique within the policy.
+	// +optional
+	Name string `json:"name,omitempty"`
+}
+
+type L7Protocol struct {
+	HTTP *HTTPProtocol `json:"http,omitempty"`
+}
+
+// HTTPProtocol matches HTTP requests with specific host, method, and path. All
+// fields could be used alone or together. If all fields are not provided, this
+// matches all HTTP requests.
+type HTTPProtocol struct {
+	// Host represents the hostname present in the URI or the HTTP Host header to match.
+	// It does not contain the port associated with the host.
+	Host string `json:"host,omitempty"`
+	// Method represents the HTTP method to match.
+	// It could be GET, POST, PUT, HEAD, DELETE, TRACE, OPTIONS, CONNECT and PATCH.
+	Method string `json:"method,omitempty"`
+	// Path represents the URI path to match (Ex. "/index.html", "/admin").
+	Path string `json:"path,omitempty"`
+}

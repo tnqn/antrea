@@ -1487,6 +1487,355 @@ spec:
       - ipp
 
 ---
+# Source: crds/l7networkpolicy.yaml
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: l7networkpolicies.crd.antrea.io
+  labels:
+    app: antrea
+spec:
+  group: crd.antrea.io
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            spec:
+              required:
+                - appliedTo
+              type: object
+              properties:
+                appliedTo:
+                  type: array
+                  items:
+                    type: object
+                    # Ensure that Spec.AppliedTo does not allow NamespaceSelector field
+                    properties:
+                      podSelector:
+                        type: object
+                        properties:
+                          matchExpressions:
+                            type: array
+                            items:
+                              type: object
+                              properties:
+                                key:
+                                  type: string
+                                operator:
+                                  enum:
+                                    - In
+                                    - NotIn
+                                    - Exists
+                                    - DoesNotExist
+                                  type: string
+                                values:
+                                  type: array
+                                  items:
+                                    type: string
+                                    pattern: "^(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])?$"
+                          matchLabels:
+                            x-kubernetes-preserve-unknown-fields: true
+                      group:
+                        type: string
+                ingress:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      protocols:
+                        type: array
+                        items:
+                          type: object
+                          oneOf:
+                            - required: [http]
+                          properties:
+                            http:
+                              type: object
+                              properties:
+                                method:
+                                  type: string
+                                  enum:
+                                    - GET
+                                    - POST
+                                    - PUT
+                                    - HEAD
+                                    - DELETE
+                                    - TRACE
+                                    - OPTIONS
+                                    - CONNECT
+                                    - PATCH
+                                host:
+                                  type: string
+                                path:
+                                  type: string
+                      from:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            podSelector:
+                              type: object
+                              properties:
+                                matchExpressions:
+                                  type: array
+                                  items:
+                                    type: object
+                                    properties:
+                                      key:
+                                        type: string
+                                      operator:
+                                        enum:
+                                          - In
+                                          - NotIn
+                                          - Exists
+                                          - DoesNotExist
+                                        type: string
+                                      values:
+                                        type: array
+                                        items:
+                                          type: string
+                                          pattern: "^(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])?$"
+                                matchLabels:
+                                  x-kubernetes-preserve-unknown-fields: true
+                            namespaceSelector:
+                              type: object
+                              properties:
+                                matchExpressions:
+                                  type: array
+                                  items:
+                                    type: object
+                                    properties:
+                                      key:
+                                        type: string
+                                      operator:
+                                        enum:
+                                          - In
+                                          - NotIn
+                                          - Exists
+                                          - DoesNotExist
+                                        type: string
+                                      values:
+                                        type: array
+                                        items:
+                                          type: string
+                                          pattern: "^(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])?$"
+                                matchLabels:
+                                  x-kubernetes-preserve-unknown-fields: true
+                            externalEntitySelector:
+                              type: object
+                              properties:
+                                matchExpressions:
+                                  type: array
+                                  items:
+                                    type: object
+                                    properties:
+                                      key:
+                                        type: string
+                                      operator:
+                                        enum:
+                                          - In
+                                          - NotIn
+                                          - Exists
+                                          - DoesNotExist
+                                        type: string
+                                      values:
+                                        type: array
+                                        items:
+                                          type: string
+                                          pattern: "^(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])?$"
+                                matchLabels:
+                                  x-kubernetes-preserve-unknown-fields: true
+                            ipBlock:
+                              type: object
+                              properties:
+                                cidr:
+                                  type: string
+                                  format: cidr
+                            nodeSelector:
+                              type: object
+                              properties:
+                                matchExpressions:
+                                  items:
+                                    properties:
+                                      key:
+                                        type: string
+                                      operator:
+                                        enum:
+                                          - In
+                                          - NotIn
+                                          - Exists
+                                          - DoesNotExist
+                                        type: string
+                                      values:
+                                        items:
+                                          type: string
+                                          pattern: "^(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])?$"
+                                        type: array
+                                    type: object
+                                  type: array
+                                matchLabels:
+                                  x-kubernetes-preserve-unknown-fields: true
+                            group:
+                              type: string
+                      name:
+                        type: string
+                egress:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      protocols:
+                        type: array
+                        items:
+                          type: object
+                          oneOf:
+                            - required: [ http ]
+                          properties:
+                            http:
+                              type: object
+                              properties:
+                                method:
+                                  type: string
+                                  enum:
+                                    - GET
+                                    - POST
+                                    - PUT
+                                    - HEAD
+                                    - DELETE
+                                    - TRACE
+                                    - OPTIONS
+                                    - CONNECT
+                                    - PATCH
+                                host:
+                                  type: string
+                                path:
+                                  type: string
+                      to:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            podSelector:
+                              type: object
+                              properties:
+                                matchExpressions:
+                                  type: array
+                                  items:
+                                    type: object
+                                    properties:
+                                      key:
+                                        type: string
+                                      operator:
+                                        enum:
+                                          - In
+                                          - NotIn
+                                          - Exists
+                                          - DoesNotExist
+                                        type: string
+                                      values:
+                                        type: array
+                                        items:
+                                          type: string
+                                          pattern: "^(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])?$"
+                                matchLabels:
+                                  x-kubernetes-preserve-unknown-fields: true
+                            namespaceSelector:
+                              type: object
+                              properties:
+                                matchExpressions:
+                                  type: array
+                                  items:
+                                    type: object
+                                    properties:
+                                      key:
+                                        type: string
+                                      operator:
+                                        enum:
+                                          - In
+                                          - NotIn
+                                          - Exists
+                                          - DoesNotExist
+                                        type: string
+                                      values:
+                                        type: array
+                                        items:
+                                          type: string
+                                          pattern: "^(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])?$"
+                                matchLabels:
+                                  x-kubernetes-preserve-unknown-fields: true
+                            externalEntitySelector:
+                              type: object
+                              properties:
+                                matchExpressions:
+                                  type: array
+                                  items:
+                                    type: object
+                                    properties:
+                                      key:
+                                        type: string
+                                      operator:
+                                        enum:
+                                          - In
+                                          - NotIn
+                                          - Exists
+                                          - DoesNotExist
+                                        type: string
+                                      values:
+                                        type: array
+                                        items:
+                                          type: string
+                                          pattern: "^(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])?$"
+                                matchLabels:
+                                  x-kubernetes-preserve-unknown-fields: true
+                            ipBlock:
+                              type: object
+                              properties:
+                                cidr:
+                                  type: string
+                                  format: cidr
+                            nodeSelector:
+                              type: object
+                              properties:
+                                matchExpressions:
+                                  items:
+                                    properties:
+                                      key:
+                                        type: string
+                                      operator:
+                                        enum:
+                                          - In
+                                          - NotIn
+                                          - Exists
+                                          - DoesNotExist
+                                        type: string
+                                      values:
+                                        items:
+                                          type: string
+                                          pattern: "^(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])?$"
+                                        type: array
+                                    type: object
+                                  type: array
+                                matchLabels:
+                                  x-kubernetes-preserve-unknown-fields: true
+                            group:
+                              type: string
+                      name:
+                        type: string
+      subresources:
+        status: {}
+  scope: Namespaced
+  names:
+    plural: l7networkpolicies
+    singular: l7networkpolicy
+    kind: L7NetworkPolicy
+    shortNames:
+      - l7np
+
+---
 # Source: crds/networkpolicy.yaml
 apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
@@ -3883,6 +4232,7 @@ rules:
     resources:
       - clusternetworkpolicies
       - networkpolicies
+      - l7networkpolicies
     verbs:
       - get
       - watch

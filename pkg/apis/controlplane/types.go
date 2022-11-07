@@ -274,11 +274,13 @@ const (
 	ProtocolICMP Protocol = "ICMP"
 
 	ProtocolIGMP Protocol = "IGMP"
+
+	ProtocolHTTP Protocol = "HTTP"
 )
 
 // Service describes a port to allow traffic on.
 type Service struct {
-	// The protocol (TCP, UDP, SCTP, or ICMP) which traffic must match. If not specified, this
+	// The protocol (TCP, UDP, SCTP, ICMP, or HTTP) which traffic must match. If not specified, this
 	// field defaults to TCP.
 	// +optional
 	Protocol *Protocol
@@ -299,6 +301,16 @@ type Service struct {
 	// IGMPType and GroupAddress can only be specified when the Protocol is IGMP.
 	IGMPType     *int32
 	GroupAddress string
+
+	// The fields are specific to the HTTP protocol.
+	// Host represents the hostname present in the URI or the HTTP Host header to match.
+	// It does not contain the port associated with the host.
+	Host string
+	// Method represents the HTTP method to match.
+	// It could be GET, POST, PUT, HEAD, DELETE, TRACE, OPTIONS, CONNECT and PATCH.
+	Method string
+	// Path represents the URI path to match (Ex. "/index.html", "/admin").
+	Path string
 }
 
 // NetworkPolicyPeer describes a peer of NetworkPolicyRules.

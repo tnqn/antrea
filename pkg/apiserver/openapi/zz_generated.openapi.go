@@ -1999,6 +1999,27 @@ func schema_pkg_apis_controlplane_v1beta2_Service(ref common.ReferenceCallback) 
 							Format: "",
 						},
 					},
+					"host": {
+						SchemaProps: spec.SchemaProps{
+							Description: "The fields are specific to the HTTP protocol. Host represents the hostname present in the URI or the HTTP Host header to match. It does not contain the port associated with the host.",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"method": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Method represents the HTTP method to match. It could be GET, POST, PUT, HEAD, DELETE, TRACE, OPTIONS, CONNECT and PATCH.",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"path": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Path represents the URI path to match (Ex. \"/index.html\", \"/admin\").",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
 				},
 			},
 		},

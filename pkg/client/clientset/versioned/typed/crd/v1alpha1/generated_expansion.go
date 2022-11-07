@@ -20,6 +20,8 @@ type ClusterNetworkPolicyExpansion interface{}
 
 type ExternalNodeExpansion interface{}
 
+type L7NetworkPolicyExpansion interface{}
+
 type NetworkPolicyExpansion interface{}
 
 type SupportBundleCollectionExpansion interface{}
