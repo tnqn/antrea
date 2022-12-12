@@ -778,7 +778,7 @@ func run(o *Options) error {
 	secureServing.CipherSuites = o.tlsCipherSuites
 	secureServing.MinTLSVersion = o.config.TLSMinVersion
 	authentication := options.NewDelegatingAuthenticationOptions()
-	authorization := options.NewDelegatingAuthorizationOptions().WithAlwaysAllowPaths("/healthz", "/livez", "/readyz")
+	authorization := options.NewDelegatingAuthorizationOptions().WithAlwaysAllowPaths("/healthz", "/livez", "/readyz", "/heapdump")
 	apiServer, err := apiserver.New(
 		agentQuerier,
 		networkPolicyController,
