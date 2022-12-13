@@ -2,7 +2,7 @@ SHELL              := /bin/bash
 # go options
 GO                 ?= go
 LDFLAGS            :=
-GOFLAGS            :=
+GOFLAGS            ?=
 IPSEC              ?= n
 BINDIR             ?= $(CURDIR)/bin
 GO_FILES           := $(shell find . -type d -name '.cache' -prune -o -type f -name '*.go' -print)
@@ -184,6 +184,10 @@ DOCKER_ENV := \
 	@docker run --rm -u $$(id -u):$$(id -g) \
 		-e "GOCACHE=/tmp/gocache" \
 		-e "GOPATH=/tmp/gopath" \
+		-e "GOFLAGS=$(GOFLAGS)" \
+		-e "GIT_SHA=$(GIT_SHA)" \
+		-e "GIT_TAG=$(GIT_TAG)" \
+		-e "GIT_TREE_STATE=$(GIT_TREE_STATE)" \
 		-w /usr/src/antrea.io/antrea \
 		-v $(DOCKER_CACHE)/gopath:/tmp/gopath \
 		-v $(DOCKER_CACHE)/gocache:/tmp/gocache \
