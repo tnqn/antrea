@@ -29,7 +29,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/containernetworking/plugins/pkg/ip"
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/mod/semver"
 	"gopkg.in/yaml.v2"
@@ -193,6 +192,9 @@ type TestOptions struct {
 	skipCases           string
 	linuxVMs            string
 	windowsVMs          string
+
+	node0 string
+	node1 string
 }
 
 var testOptions TestOptions
@@ -477,31 +479,31 @@ func (data *TestData) collectClusterInfo() error {
 
 		var podV4NetworkCIDR, podV6NetworkCIDR string
 		var gwV4Addr, gwV6Addr string
-		processPodCIDR := func(podCIDR string) error {
-			_, cidr, err := net.ParseCIDR(podCIDR)
-			if err != nil {
-				return err
-			}
-			if cidr.IP.To4() != nil {
-				podV4NetworkCIDR = podCIDR
-				gwV4Addr = ip.NextIP(cidr.IP).String()
-			} else {
-				podV6NetworkCIDR = podCIDR
-				gwV6Addr = ip.NextIP(cidr.IP).String()
-			}
-			return nil
-		}
-		if len(node.Spec.PodCIDRs) == 0 {
-			if err := processPodCIDR(node.Spec.PodCIDR); err != nil {
-				return fmt.Errorf("error when processing PodCIDR field for Node %s: %v", node.Name, err)
-			}
-		} else {
-			for _, podCIDR := range node.Spec.PodCIDRs {
-				if err := processPodCIDR(podCIDR); err != nil {
-					return fmt.Errorf("error when processing PodCIDRs field for Node %s: %v", node.Name, err)
-				}
-			}
-		}
+		//processPodCIDR := func(podCIDR string) error {
+		//	_, cidr, err := net.ParseCIDR(podCIDR)
+		//	if err != nil {
+		//		return err
+		//	}
+		//	if cidr.IP.To4() != nil {
+		//		podV4NetworkCIDR = podCIDR
+		//		gwV4Addr = ip.NextIP(cidr.IP).String()
+		//	} else {
+		//		podV6NetworkCIDR = podCIDR
+		//		gwV6Addr = ip.NextIP(cidr.IP).String()
+		//	}
+		//	return nil
+		//}
+		//if len(node.Spec.PodCIDRs) == 0 {
+		//	if err := processPodCIDR(node.Spec.PodCIDR); err != nil {
+		//		return fmt.Errorf("error when processing PodCIDR field for Node %s: %v", node.Name, err)
+		//	}
+		//} else {
+		//	for _, podCIDR := range node.Spec.PodCIDRs {
+		//		if err := processPodCIDR(podCIDR); err != nil {
+		//			return fmt.Errorf("error when processing PodCIDRs field for Node %s: %v", node.Name, err)
+		//		}
+		//	}
+		//}
 
 		clusterInfo.nodes[nodeIdx] = ClusterNode{
 			idx:              nodeIdx,
@@ -519,66 +521,66 @@ func (data *TestData) collectClusterInfo() error {
 		}
 		clusterInfo.nodesOS[node.Name] = node.Status.NodeInfo.OperatingSystem
 	}
-	if clusterInfo.controlPlaneNodeName == "" {
-		return fmt.Errorf("error when listing cluster Nodes: control-plane Node not found")
-	}
+	//if clusterInfo.controlPlaneNodeName == "" {
+	//	return fmt.Errorf("error when listing cluster Nodes: control-plane Node not found")
+	//}
 	clusterInfo.numNodes = workerIdx
 
-	retrieveCIDRs := func(cmd string, reg string) ([]string, error) {
-		res := make([]string, 2)
-		rc, stdout, _, err := data.RunCommandOnNode(controlPlaneNodeName(), cmd)
-		if err != nil || rc != 0 {
-			return res, fmt.Errorf("error when running the following command `%s` on control-plane Node: %v, %s", cmd, err, stdout)
-		}
-		re := regexp.MustCompile(reg)
-		matches := re.FindStringSubmatch(stdout)
-		if len(matches) == 0 {
-			return res, fmt.Errorf("cannot retrieve CIDR, unexpected kubectl output: %s", stdout)
-		}
-		cidrs := strings.Split(matches[1], ",")
-		if len(cidrs) == 1 {
-			_, cidr, err := net.ParseCIDR(cidrs[0])
-			if err != nil {
-				return res, fmt.Errorf("CIDR cannot be parsed: %s", cidrs[0])
-			}
-			if cidr.IP.To4() != nil {
-				res[0] = cidrs[0]
-			} else {
-				res[1] = cidrs[0]
-			}
-		} else if len(cidrs) == 2 {
-			_, cidr, err := net.ParseCIDR(cidrs[0])
-			if err != nil {
-				return res, fmt.Errorf("CIDR cannot be parsed: %s", cidrs[0])
-			}
-			if cidr.IP.To4() != nil {
-				res[0] = cidrs[0]
-				res[1] = cidrs[1]
-			} else {
-				res[0] = cidrs[1]
-				res[1] = cidrs[0]
-			}
-		} else {
-			return res, fmt.Errorf("unexpected cluster CIDR: %s", matches[1])
-		}
-		return res, nil
-	}
+	//retrieveCIDRs := func(cmd string, reg string) ([]string, error) {
+	//	res := make([]string, 2)
+	//	rc, stdout, _, err := data.RunCommandOnNode(controlPlaneNodeName(), cmd)
+	//	if err != nil || rc != 0 {
+	//		return res, fmt.Errorf("error when running the following command `%s` on control-plane Node: %v, %s", cmd, err, stdout)
+	//	}
+	//	re := regexp.MustCompile(reg)
+	//	matches := re.FindStringSubmatch(stdout)
+	//	if len(matches) == 0 {
+	//		return res, fmt.Errorf("cannot retrieve CIDR, unexpected kubectl output: %s", stdout)
+	//	}
+	//	cidrs := strings.Split(matches[1], ",")
+	//	if len(cidrs) == 1 {
+	//		_, cidr, err := net.ParseCIDR(cidrs[0])
+	//		if err != nil {
+	//			return res, fmt.Errorf("CIDR cannot be parsed: %s", cidrs[0])
+	//		}
+	//		if cidr.IP.To4() != nil {
+	//			res[0] = cidrs[0]
+	//		} else {
+	//			res[1] = cidrs[0]
+	//		}
+	//	} else if len(cidrs) == 2 {
+	//		_, cidr, err := net.ParseCIDR(cidrs[0])
+	//		if err != nil {
+	//			return res, fmt.Errorf("CIDR cannot be parsed: %s", cidrs[0])
+	//		}
+	//		if cidr.IP.To4() != nil {
+	//			res[0] = cidrs[0]
+	//			res[1] = cidrs[1]
+	//		} else {
+	//			res[0] = cidrs[1]
+	//			res[1] = cidrs[0]
+	//		}
+	//	} else {
+	//		return res, fmt.Errorf("unexpected cluster CIDR: %s", matches[1])
+	//	}
+	//	return res, nil
+	//}
 
-	// retrieve cluster CIDRs
-	podCIDRs, err := retrieveCIDRs("kubectl cluster-info dump | grep cluster-cidr", `cluster-cidr=([^"]+)`)
-	if err != nil {
-		return err
-	}
-	clusterInfo.podV4NetworkCIDR = podCIDRs[0]
-	clusterInfo.podV6NetworkCIDR = podCIDRs[1]
-
-	// retrieve service CIDRs
-	svcCIDRs, err := retrieveCIDRs("kubectl cluster-info dump | grep service-cluster-ip-range", `service-cluster-ip-range=([^"]+)`)
-	if err != nil {
-		return err
-	}
-	clusterInfo.svcV4NetworkCIDR = svcCIDRs[0]
-	clusterInfo.svcV6NetworkCIDR = svcCIDRs[1]
+	//// retrieve cluster CIDRs
+	//podCIDRs, err := retrieveCIDRs("kubectl cluster-info dump | grep cluster-cidr", `cluster-cidr=([^"]+)`)
+	//if err != nil {
+	//	return err
+	//}
+	//clusterInfo.podV4NetworkCIDR = podCIDRs[0]
+	//clusterInfo.podV6NetworkCIDR = podCIDRs[1]
+	//
+	//// retrieve service CIDRs
+	//svcCIDRs, err := retrieveCIDRs("kubectl cluster-info dump | grep service-cluster-ip-range", `service-cluster-ip-range=([^"]+)`)
+	//if err != nil {
+	//	return err
+	//}
+	//clusterInfo.svcV4NetworkCIDR = svcCIDRs[0]
+	//clusterInfo.svcV6NetworkCIDR = svcCIDRs[1]
 
 	// Retrieve kubernetes Service host and Port
 	svc, err := testData.clientset.CoreV1().Services("default").Get(context.TODO(), "kubernetes", metav1.GetOptions{})

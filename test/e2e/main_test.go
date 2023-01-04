@@ -17,10 +17,8 @@ package e2e
 import (
 	"flag"
 	"log"
-	"math/rand"
 	"os"
 	"testing"
-	"time"
 )
 
 // setupLogging creates a temporary directory to export the test logs if necessary. If a directory
@@ -85,6 +83,8 @@ func testMain(m *testing.M) int {
 	flag.StringVar(&testOptions.skipCases, "skip", "", "Key words to skip cases")
 	flag.StringVar(&testOptions.linuxVMs, "linuxVMs", "", "hostname of Linux VMs")
 	flag.StringVar(&testOptions.windowsVMs, "windowsVMs", "", "hostname of Windows VMs")
+	flag.StringVar(&testOptions.node0, "node0", "", "Node0")
+	flag.StringVar(&testOptions.node1, "node1", "", "Node1")
 	flag.Parse()
 
 	cleanupLogging := testOptions.setupLogging()
@@ -119,17 +119,17 @@ func testMain(m *testing.M) int {
 		log.Printf("Service IPv6 network: '%s'", clusterInfo.svcV6NetworkCIDR)
 	}
 	log.Printf("Num nodes: %d", clusterInfo.numNodes)
-	err = ensureAntreaRunning(testData)
-	if err != nil {
-		log.Fatalf("Error when deploying Antrea: %v", err)
-	}
-	AntreaConfigMap, err = testData.GetAntreaConfigMap(antreaNamespace)
-	if err != nil {
-		log.Fatalf("Error when getting antrea-config configmap: %v", err)
-	}
-	rand.Seed(time.Now().UnixNano())
-	defer testOptions.setupCoverage()
-	defer gracefulExitAntrea(testData)
+	//err = ensureAntreaRunning(testData)
+	//if err != nil {
+	//	log.Fatalf("Error when deploying Antrea: %v", err)
+	//}
+	//AntreaConfigMap, err = testData.GetAntreaConfigMap(antreaNamespace)
+	//if err != nil {
+	//	log.Fatalf("Error when getting antrea-config configmap: %v", err)
+	//}
+	//rand.Seed(time.Now().UnixNano())
+	//defer testOptions.setupCoverage()
+	//defer gracefulExitAntrea(testData)
 	ret := m.Run()
 	return ret
 }

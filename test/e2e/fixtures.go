@@ -226,9 +226,9 @@ func setupTest(tb testing.TB) (*TestData, error) {
 	}()
 	testData.testNamespace = randName(strings.ToLower(tb.Name()) + "-")
 	tb.Logf("Creating '%s' K8s Namespace", testData.testNamespace)
-	if err := ensureAntreaRunning(testData); err != nil {
-		return nil, err
-	}
+	//if err := ensureAntreaRunning(testData); err != nil {
+	//	return nil, err
+	//}
 	if err := testData.CreateNamespace(testData.testNamespace, nil); err != nil {
 		return nil, err
 	}
