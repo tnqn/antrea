@@ -29,7 +29,7 @@ spec:
         - "antrea-resource-init -f /etc/antrea/init-resources.yaml && sleep infinity"
         command:
         - sh
-        image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+        image: {{ include "antreaImage" . | quote }}
         imagePullPolicy: {{ .Values.image.pullPolicy }}
         name: antrea-resource-init
         volumeMounts:

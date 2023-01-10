@@ -4343,7 +4343,7 @@ spec:
       serviceAccountName: antrea-agent
       initContainers:
         - name: antrea-agent-tweaker
-          image: "antrea/antrea-ubuntu:"
+          image: "antrea/antrea-ubuntu:latest"
           imagePullPolicy: IfNotPresent
           resources:
             requests:

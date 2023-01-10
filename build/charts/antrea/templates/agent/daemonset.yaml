@@ -88,7 +88,7 @@ spec:
       {{- end }}
         {{- if .Values.antreaAgentTweaker.enable }}
         - name: antrea-agent-tweaker
-          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          image: {{ include "antreaImage" . | quote }}
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           resources: {{- .Values.agent.antreaAgentTweaker.resources | toYaml | nindent 12 }}
           command: ["antrea-agent-tweaker"]
