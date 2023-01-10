@@ -1,0 +1,28 @@
+apiVersion: crd.antrea.io/v1alpha1
+kind: NetworkPolicy
+metadata:
+  name: allow-client-to-server
+spec:
+  priority: 1
+  ingress:
+    - action: Allow
+      appliedTo:
+        - podSelector:
+            matchLabels:
+              app: server
+      from:
+        - podSelector:
+            matchLabels:
+              app: client
+      enableLogging: true
+  egress:
+    - action: Allow
+      appliedTo:
+        - podSelector:
+            matchLabels:
+              app: client
+      to:
+        - podSelector:
+            matchLabels:
+              app: server
+      enableLogging: true

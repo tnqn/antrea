@@ -1,0 +1,19 @@
+apiVersion: crd.antrea.io/v1alpha1
+kind: ClusterNetworkPolicy
+metadata:
+  name: acnp-reject-ping-request
+spec:
+  priority: 1
+  tier: securityops
+  appliedTo:
+    - podSelector:
+        matchLabels:
+          app: client
+  egress:
+    - action: Drop
+      protocols:
+        - icmp:
+            icmpType: 8
+            icmpCode: 0
+      name: DropPingRequest
+      enableLogging: true

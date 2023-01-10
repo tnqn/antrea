@@ -1,0 +1,17 @@
+apiVersion: crd.antrea.io/v1alpha1
+kind: ClusterNetworkPolicy
+metadata:
+  name: acnp-fqdn-all-foobar
+spec:
+  priority: 1
+  tier: securityops
+  appliedTo:
+    - podSelector:
+        matchLabels:
+          app: client
+  egress:
+    - action: Allow
+      to:
+        - fqdn: "*.github.com"
+        - fqdn: "www.google.com"
+      enableLogging: true

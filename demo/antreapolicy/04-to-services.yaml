@@ -1,14 +1,15 @@
 apiVersion: crd.antrea.io/v1alpha1
 kind: ClusterNetworkPolicy
 metadata:
-  name: allow-intra-namespace
+  name: acnp-allow-to-kube-dns
 spec:
-  priority: 5
+  priority: 1
   tier: securityops
   appliedTo:
     - namespaceSelector: {}
-  ingress:
+  egress:
     - action: Allow
-      from:
-        - namespaces:
-            match: Self
+      toServices:
+        - name: kube-dns
+          namespace: kube-system
+      enableLogging: true

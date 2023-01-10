@@ -1,0 +1,24 @@
+apiVersion: crd.antrea.io/v1alpha1
+kind: NetworkPolicy
+metadata:
+  name: ingress-allow-http-request-to-api-v2
+spec:
+  priority: 5
+  tier: application
+  appliedTo:
+    - podSelector:
+        matchLabels:
+          app: server
+  ingress:
+    - name: allow-http
+      action: Allow
+      from:
+        - podSelector:
+            matchLabels:
+              app: client
+      l7Protocols:
+        - http:
+            path: "/api/v2/*"
+            method: "GET"
+    - name: drop-other
+      action: Drop

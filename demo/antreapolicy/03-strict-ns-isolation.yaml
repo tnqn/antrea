@@ -1,0 +1,30 @@
+apiVersion: crd.antrea.io/v1alpha1
+kind: ClusterNetworkPolicy
+metadata:
+  name: strict-ns-isolation
+spec:
+  priority: 5
+  tier: securityops
+  appliedTo:
+    - namespaceSelector:
+        matchExpressions:
+          - key: kubernetes.io/metadata.name
+            operator: NotIn
+            values:
+              - kube-system
+  ingress:
+    - action: Allow
+      from:
+        - namespaces:
+            match: Self
+      enableLogging: true
+    - action: Drop
+      enableLogging: true
+  egress:
+    - action: Allow
+      to:
+        - namespaces:
+            match: Self
+      enableLogging: true
+    - action: Drop
+      enableLogging: true
