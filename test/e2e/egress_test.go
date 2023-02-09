@@ -62,6 +62,7 @@ func TestEgress(t *testing.T) {
 	t.Run("testEgressUpdateEgressIP", func(t *testing.T) { testEgressUpdateEgressIP(t, data) })
 	t.Run("testEgressUpdateNodeSelector", func(t *testing.T) { testEgressUpdateNodeSelector(t, data) })
 	t.Run("testEgressNodeFailure", func(t *testing.T) { testEgressNodeFailure(t, data) })
+	t.Run("testEgressMultiplePools", func(t *testing.T) { testEgressMultiplePools(t, data) })
 	t.Run("testCreateExternalIPPool", func(t *testing.T) { testCreateExternalIPPool(t, data) })
 }
 
@@ -214,7 +215,7 @@ ip netns exec %[1]s /agnhost netexec
 					Operator: metav1.LabelSelectorOpExists,
 				},
 			}
-			egress := data.createEgress(t, "egress-", matchExpressions, nil, "", egressNodeIP)
+			egress := data.createEgress(t, "egress-", matchExpressions, nil, "", egressNodeIP, nil)
 			defer data.crdClient.CrdV1alpha2().Egresses().Delete(context.TODO(), egress.Name, metav1.DeleteOptions{})
 			assertClientIP(localPod, egressNodeIP)
 			assertClientIP(remotePod, egressNodeIP)
@@ -366,7 +367,7 @@ func testEgressCRUD(t *testing.T, data *TestData) {
 			pool := data.createExternalIPPool(t, "crud-pool-", tt.ipRange, tt.nodeSelector.MatchExpressions, tt.nodeSelector.MatchLabels)
 			defer data.crdClient.CrdV1alpha2().ExternalIPPools().Delete(context.TODO(), pool.Name, metav1.DeleteOptions{})
 
-			egress := data.createEgress(t, "crud-egress-", nil, map[string]string{"foo": "bar"}, pool.Name, "")
+			egress := data.createEgress(t, "crud-egress-", nil, map[string]string{"foo": "bar"}, pool.Name, "", nil)
 			defer data.crdClient.CrdV1alpha2().Egresses().Delete(context.TODO(), egress.Name, metav1.DeleteOptions{})
 			// Use Poll to wait the interval before the first run to detect the case that the IP is assigned to any Node
 			// when it's not supposed to.
@@ -483,7 +484,7 @@ func testEgressUpdateEgressIP(t *testing.T, data *TestData) {
 			newPool := data.createExternalIPPool(t, "newpool-", tt.newIPRange, nil, map[string]string{v1.LabelHostname: tt.newNode})
 			defer data.crdClient.CrdV1alpha2().ExternalIPPools().Delete(context.TODO(), newPool.Name, metav1.DeleteOptions{})
 
-			egress := data.createEgress(t, "egress-", nil, map[string]string{"foo": "bar"}, originalPool.Name, "")
+			egress := data.createEgress(t, "egress-", nil, map[string]string{"foo": "bar"}, originalPool.Name, "", nil)
 			defer data.crdClient.CrdV1alpha2().Egresses().Delete(context.TODO(), egress.Name, metav1.DeleteOptions{})
 			egress, err := data.checkEgressState(egress.Name, tt.originalEgressIP, tt.originalNode, "", time.Second)
 			require.NoError(t, err)
@@ -619,6 +620,55 @@ func testEgressNodeFailure(t *testing.T, data *TestData) {
 	}
 }
 
+func testEgressMultiplePools(t *testing.T, data *TestData) {
+	selectNode0 := []metav1.LabelSelectorRequirement{
+		{
+			Key:      v1.LabelHostname,
+			Operator: metav1.LabelSelectorOpIn,
+			Values:   []string{nodeName(0)},
+		},
+	}
+	ipRange0 := v1alpha2.IPRange{CIDR: "10.10.10.0/30"}
+	eip0 := data.createExternalIPPool(t, "eip-multi-az", ipRange0, selectNode0, nil)
+	defer data.crdClient.CrdV1alpha2().ExternalIPPools().Delete(context.TODO(), eip0.Name, metav1.DeleteOptions{})
+
+	selectNode1 := []metav1.LabelSelectorRequirement{
+		{
+			Key:      v1.LabelHostname,
+			Operator: metav1.LabelSelectorOpIn,
+			Values:   []string{nodeName(1)},
+		},
+	}
+	ipRange1 := v1alpha2.IPRange{CIDR: "20.20.20.0/30"}
+	eip1 := data.createExternalIPPool(t, "eip-multi-az-secondary-", ipRange1, selectNode1, nil)
+	defer data.crdClient.CrdV1alpha2().ExternalIPPools().Delete(context.TODO(), eip1.Name, metav1.DeleteOptions{})
+
+	externalIPPools := []string{eip0.Name, eip1.Name}
+
+	egress := data.createEgress(t, "multi-az-egress-", nil, map[string]string{"foo": "bar"}, "", "", externalIPPools)
+	defer data.crdClient.CrdV1alpha2().Egresses().Delete(context.TODO(), egress.Name, metav1.DeleteOptions{})
+
+	// check the status.EgressIP instead of spec.EgressIP
+	egress, err := data.checkEgressState(egress.Name, "10.10.10.1", nodeName(0), "", time.Second)
+	require.NoError(t, err)
+
+	eip0ToUpdate, err := data.crdClient.CrdV1alpha2().ExternalIPPools().Get(context.TODO(), eip0.Name, metav1.GetOptions{})
+	require.NoError(t, err, "Failed to get ExternalIPPool %v", eip0ToUpdate)
+	eip0ToUpdate.Spec.NodeSelector.MatchExpressions = []metav1.LabelSelectorRequirement{
+		{
+			Key:      v1.LabelHostname,
+			Operator: metav1.LabelSelectorOpIn,
+			Values:   []string{"fake-node"},
+		},
+	}
+	_, err = data.crdClient.CrdV1alpha2().ExternalIPPools().Update(context.TODO(), eip0ToUpdate, metav1.UpdateOptions{})
+	require.NoError(t, err, "Failed to create ExternalIPPool")
+
+	// check the status.EgressIP instead of spec.EgressIP
+	egress, err = data.checkEgressState(egress.Name, "20.20.20.1", nodeName(1), "", time.Second)
+	require.NoError(t, err)
+}
+
 func testEgressMigration(t *testing.T, data *TestData, triggerFunc, revertFunc func(poolName, evictNode string), checkEvictNode bool, timeout time.Duration, ipRange *v1alpha2.IPRange) {
 	nodeCandidates := sets.NewString(nodeName(0), nodeName(1))
 	matchExpressions := []metav1.LabelSelectorRequirement{
@@ -631,7 +681,7 @@ func testEgressMigration(t *testing.T, data *TestData, triggerFunc, revertFunc f
 	externalIPPoolTwoNodes := data.createExternalIPPool(t, "pool-with-two-nodes-", *ipRange, matchExpressions, nil)
 	defer data.crdClient.CrdV1alpha2().ExternalIPPools().Delete(context.TODO(), externalIPPoolTwoNodes.Name, metav1.DeleteOptions{})
 
-	egress := data.createEgress(t, "migration-egress-", nil, map[string]string{"foo": "bar"}, externalIPPoolTwoNodes.Name, "")
+	egress := data.createEgress(t, "migration-egress-", nil, map[string]string{"foo": "bar"}, externalIPPoolTwoNodes.Name, "", nil)
 	defer data.crdClient.CrdV1alpha2().Egresses().Delete(context.TODO(), egress.Name, metav1.DeleteOptions{})
 
 	var err error
@@ -671,7 +721,7 @@ func (data *TestData) checkEgressState(egressName, expectedIP, expectedNode, oth
 		if err != nil {
 			return false, err
 		}
-		if egress.Spec.EgressIP != expectedIP {
+		if egress.Status.EgressIP != expectedIP {
 			return false, nil
 		}
 		if egress.Status.EgressNode != expectedNode {
@@ -698,7 +748,7 @@ func (data *TestData) checkEgressState(egressName, expectedIP, expectedNode, oth
 		return true, nil
 	})
 	if pollErr != nil {
-		return egress, fmt.Errorf("egress did not reach expected state, err: %v, egress: %v, expectedIP: %s, expectedNode: %s, expectedNodeHasIP: %v, otherNodeHasIP: %v", pollErr, egress, expectedIP, expectedNode, expectedNodeHasIP, otherNodeHasIP)
+		return egress, fmt.Errorf("egress did not reach expected state, err: %v, egress: %+v, expectedIP: %s, expectedNode: %s, expectedNodeHasIP: %v, otherNodeHasIP: %v", pollErr, egress, expectedIP, expectedNode, expectedNodeHasIP, otherNodeHasIP)
 	}
 	return egress, nil
 }
@@ -732,7 +782,9 @@ func (data *TestData) createExternalIPPool(t *testing.T, generateName string, ip
 	return pool
 }
 
-func (data *TestData) createEgress(t *testing.T, generateName string, matchExpressions []metav1.LabelSelectorRequirement, matchLabels map[string]string, externalPoolName string, egressIP string) *v1alpha2.Egress {
+func (data *TestData) createEgress(t *testing.T, generateName string,
+	matchExpressions []metav1.LabelSelectorRequirement, matchLabels map[string]string,
+	externalPoolName string, egressIP string, externalIPPools []string) *v1alpha2.Egress {
 	egress := &v1alpha2.Egress{
 		ObjectMeta: metav1.ObjectMeta{GenerateName: generateName},
 		Spec: v1alpha2.EgressSpec{
@@ -745,6 +797,9 @@ func (data *TestData) createEgress(t *testing.T, generateName string, matchExpre
 			ExternalIPPool: externalPoolName,
 			EgressIP:       egressIP,
 		},
+	}
+	if externalIPPools != nil {
+		egress.Spec.ExternalIPPools = externalIPPools
 	}
 	egress, err := data.crdClient.CrdV1alpha2().Egresses().Create(context.TODO(), egress, metav1.CreateOptions{})
 	require.NoError(t, err, "Failed to create Egress")

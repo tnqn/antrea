@@ -1083,11 +1083,17 @@ spec:
             type: object
             required:
             - appliedTo
-            anyOf:
-            - required:
-              - egressIP
-            - required:
-              - externalIPPool
+            oneOf:
+              - anyOf:
+                - required:
+                  - egressIP
+                - required:
+                  - externalIPPool
+              - anyOf:
+                - required:
+                  - egressIPs
+                - required:
+                  - externalIPPools
             properties:
               appliedTo:
                 type: object

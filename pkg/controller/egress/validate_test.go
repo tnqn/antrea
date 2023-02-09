@@ -35,14 +35,14 @@ func marshal(object runtime.Object) []byte {
 
 func TestEgressControllerValidateEgress(t *testing.T) {
 	tests := []struct {
-		name                   string
-		existingExternalIPPool *crdv1alpha2.ExternalIPPool
-		request                *admv1.AdmissionRequest
-		expectedResponse       *admv1.AdmissionResponse
+		name                    string
+		existingExternalIPPools []*crdv1alpha2.ExternalIPPool
+		request                 *admv1.AdmissionRequest
+		expectedResponse        *admv1.AdmissionResponse
 	}{
 		{
-			name:                   "Requesting IP from non-existing ExternalIPPool should not be allowed",
-			existingExternalIPPool: nil,
+			name:                    "Requesting IP from non-existing ExternalIPPool should not be allowed",
+			existingExternalIPPools: nil,
 			request: &admv1.AdmissionRequest{
 				Name:      "foo",
 				Operation: "CREATE",
@@ -56,8 +56,25 @@ func TestEgressControllerValidateEgress(t *testing.T) {
 			},
 		},
 		{
-			name:                   "Requesting IP out of range should not be allowed",
-			existingExternalIPPool: newExternalIPPool("bar", "10.10.10.0/24", "", ""),
+			name: "Requesting IP from non-existing ExternalIPPool should not be allowed[multi-Pools]",
+			existingExternalIPPools: []*crdv1alpha2.ExternalIPPool{
+				newExternalIPPool("bar", "10.10.10.0/24", "", ""),
+			},
+			request: &admv1.AdmissionRequest{
+				Name:      "foo",
+				Operation: "CREATE",
+				Object:    runtime.RawExtension{Raw: marshal(newEgressWithMultiExternalIPPools("foo", "", "", []string{"1.1.1.1", "10.10.10.1"}, []string{"nonExistingPool", "bar"}, nil, nil))},
+			},
+			expectedResponse: &admv1.AdmissionResponse{
+				Allowed: false,
+				Result: &metav1.Status{
+					Message: "ExternalIPPool nonExistingPool does not exist",
+				},
+			},
+		},
+		{
+			name:                    "Requesting IP out of range should not be allowed",
+			existingExternalIPPools: []*crdv1alpha2.ExternalIPPool{newExternalIPPool("bar", "10.10.10.0/24", "", "")},
 			request: &admv1.AdmissionRequest{
 				Name:      "foo",
 				Operation: "CREATE",
@@ -71,8 +88,26 @@ func TestEgressControllerValidateEgress(t *testing.T) {
 			},
 		},
 		{
-			name:                   "Requesting normal IP should be allowed",
-			existingExternalIPPool: newExternalIPPool("bar", "10.10.10.0/24", "", ""),
+			name: "Requesting IP out of range should not be allowed[multi-pools]",
+			existingExternalIPPools: []*crdv1alpha2.ExternalIPPool{
+				newExternalIPPool("bar", "10.10.10.0/24", "", ""),
+				newExternalIPPool("bar1", "20.20.20.0/24", "", ""),
+			},
+			request: &admv1.AdmissionRequest{
+				Name:      "foo",
+				Operation: "CREATE",
+				Object:    runtime.RawExtension{Raw: marshal(newEgressWithMultiExternalIPPools("foo", "", "", []string{"10.10.11.1", "20.20.20.1"}, []string{"bar", "bar1"}, nil, nil))},
+			},
+			expectedResponse: &admv1.AdmissionResponse{
+				Allowed: false,
+				Result: &metav1.Status{
+					Message: "IP 10.10.11.1 is not within the IP range",
+				},
+			},
+		},
+		{
+			name:                    "Requesting normal IP should be allowed",
+			existingExternalIPPools: []*crdv1alpha2.ExternalIPPool{newExternalIPPool("bar", "10.10.10.0/24", "", "")},
 			request: &admv1.AdmissionRequest{
 				Name:      "foo",
 				Operation: "CREATE",
@@ -81,8 +116,112 @@ func TestEgressControllerValidateEgress(t *testing.T) {
 			expectedResponse: &admv1.AdmissionResponse{Allowed: true},
 		},
 		{
-			name:                   "Updating EgressIP to invalid one should not be allowed",
-			existingExternalIPPool: newExternalIPPool("bar", "10.10.10.0/24", "", ""),
+			name:                    "Requesting EgressIPs nums larger than ExternalIPPools should not be allowed[multi-pools]",
+			existingExternalIPPools: []*crdv1alpha2.ExternalIPPool{newExternalIPPool("bar", "10.10.10.0/24", "", "")},
+			request: &admv1.AdmissionRequest{
+				Name:      "foo",
+				Operation: "CREATE",
+				Object:    runtime.RawExtension{Raw: marshal(newEgressWithMultiExternalIPPools("foo", "", "", []string{"10.10.10.1", "2.2.2.2"}, []string{"bar"}, nil, nil))},
+			},
+			expectedResponse: &admv1.AdmissionResponse{
+				Allowed: false,
+				Result: &metav1.Status{
+					Message: "IPs number [10.10.10.1 2.2.2.2] is larger than ExternalIPPools [bar] number",
+				},
+			},
+		},
+		{
+			name:                    "Requesting ExternalIPPools is empty and EgressIPs num larger than 1 should not be allowed[multi-pools]",
+			existingExternalIPPools: nil,
+			request: &admv1.AdmissionRequest{
+				Name:      "foo",
+				Operation: "CREATE",
+				Object:    runtime.RawExtension{Raw: marshal(newEgressWithMultiExternalIPPools("foo", "", "", []string{"10.10.10.1", "2.2.2.2"}, nil, nil, nil))},
+			},
+			expectedResponse: &admv1.AdmissionResponse{
+				Allowed: false,
+				Result: &metav1.Status{
+					Message: "Invalid EgressIPs [10.10.10.1 2.2.2.2], only one EgressIP in EgressIPs is supported while ExternalIPPools num is 0",
+				},
+			},
+		},
+		{
+			name: "Requesting normal Egress with multiple ExternalIPPools should be allowed[multi-pools]",
+			existingExternalIPPools: []*crdv1alpha2.ExternalIPPool{
+				newExternalIPPool("bar", "10.10.10.0/24", "", ""),
+				newExternalIPPool("bar1", "20.20.20.0/24", "", ""),
+			},
+			request: &admv1.AdmissionRequest{
+				Name:      "foo",
+				Operation: "CREATE",
+				Object:    runtime.RawExtension{Raw: marshal(newEgressWithMultiExternalIPPools("foo", "", "", []string{"10.10.10.1", "20.20.20.1"}, []string{"bar", "bar1"}, nil, nil))},
+			},
+			expectedResponse: &admv1.AdmissionResponse{Allowed: true},
+		},
+		{
+			name: "Requesting Egress with multiple ExternalIPPools num larger than EgressIPs num should be allowed[multi-pools]",
+			existingExternalIPPools: []*crdv1alpha2.ExternalIPPool{
+				newExternalIPPool("bar", "10.10.10.0/24", "", ""),
+				newExternalIPPool("bar1", "20.20.20.0/24", "", ""),
+			},
+			request: &admv1.AdmissionRequest{
+				Name:      "foo",
+				Operation: "CREATE",
+				Object:    runtime.RawExtension{Raw: marshal(newEgressWithMultiExternalIPPools("foo", "", "", []string{"10.10.10.1"}, []string{"bar", "bar1"}, nil, nil))},
+			},
+			expectedResponse: &admv1.AdmissionResponse{Allowed: true},
+		},
+		{
+			name: "Requesting Egress with multiple ExternalIPPools and nil EgressIPs should be allowed[multi-pools]",
+			existingExternalIPPools: []*crdv1alpha2.ExternalIPPool{
+				newExternalIPPool("bar", "10.10.10.0/24", "", ""),
+				newExternalIPPool("bar1", "20.20.20.0/24", "", ""),
+			},
+			request: &admv1.AdmissionRequest{
+				Name:      "foo",
+				Operation: "CREATE",
+				Object:    runtime.RawExtension{Raw: marshal(newEgressWithMultiExternalIPPools("foo", "", "", nil, []string{"bar", "bar1"}, nil, nil))},
+			},
+			expectedResponse: &admv1.AdmissionResponse{Allowed: true},
+		},
+		{
+			name: "Requesting Egress with multiple ExternalIPPools(with '' pool) and nil EgressIPs should not be allowed[multi-pools]",
+			existingExternalIPPools: []*crdv1alpha2.ExternalIPPool{
+				newExternalIPPool("bar", "10.10.10.0/24", "", ""),
+				newExternalIPPool("bar1", "20.20.20.0/24", "", ""),
+			},
+			request: &admv1.AdmissionRequest{
+				Name:      "foo",
+				Operation: "CREATE",
+				Object:    runtime.RawExtension{Raw: marshal(newEgressWithMultiExternalIPPools("foo", "", "", nil, []string{"bar", "bar1", ""}, nil, nil))},
+			},
+			expectedResponse: &admv1.AdmissionResponse{
+				Allowed: false,
+				Result: &metav1.Status{
+					Message: "Invalid ExternalIPPool: ",
+				},
+			},
+		},
+		{
+			name: "Requesting Egress with multiple ExternalIPPools(with duplicate pool name) and nil EgressIPs should not be allowed[multi-pools]",
+			existingExternalIPPools: []*crdv1alpha2.ExternalIPPool{
+				newExternalIPPool("bar", "10.10.10.0/24", "", ""),
+			},
+			request: &admv1.AdmissionRequest{
+				Name:      "foo",
+				Operation: "CREATE",
+				Object:    runtime.RawExtension{Raw: marshal(newEgressWithMultiExternalIPPools("foo", "", "", nil, []string{"bar", "bar"}, nil, nil))},
+			},
+			expectedResponse: &admv1.AdmissionResponse{
+				Allowed: false,
+				Result: &metav1.Status{
+					Message: "Duplicate ExternalIPPool bar in ExternalIPPools",
+				},
+			},
+		},
+		{
+			name:                    "Updating EgressIP to invalid one should not be allowed",
+			existingExternalIPPools: []*crdv1alpha2.ExternalIPPool{newExternalIPPool("bar", "10.10.10.0/24", "", "")},
 			request: &admv1.AdmissionRequest{
 				Name:      "foo",
 				Operation: "UPDATE",
@@ -97,8 +236,8 @@ func TestEgressControllerValidateEgress(t *testing.T) {
 			},
 		},
 		{
-			name:                   "Updating EgressIP to valid one should be allowed",
-			existingExternalIPPool: newExternalIPPool("bar", "10.10.10.0/24", "", ""),
+			name:                    "Updating EgressIP to valid one should be allowed",
+			existingExternalIPPools: []*crdv1alpha2.ExternalIPPool{newExternalIPPool("bar", "10.10.10.0/24", "", "")},
 			request: &admv1.AdmissionRequest{
 				Name:      "foo",
 				Operation: "UPDATE",
@@ -108,8 +247,8 @@ func TestEgressControllerValidateEgress(t *testing.T) {
 			expectedResponse: &admv1.AdmissionResponse{Allowed: true},
 		},
 		{
-			name:                   "Updating podSelector should be allowed",
-			existingExternalIPPool: newExternalIPPool("bar", "10.10.10.0/24", "", ""),
+			name:                    "Updating podSelector should be allowed",
+			existingExternalIPPools: []*crdv1alpha2.ExternalIPPool{newExternalIPPool("bar", "10.10.10.0/24", "", "")},
 			request: &admv1.AdmissionRequest{
 				Name:      "foo",
 				Operation: "UPDATE",
@@ -135,8 +274,8 @@ func TestEgressControllerValidateEgress(t *testing.T) {
 			stopCh := make(chan struct{})
 			defer close(stopCh)
 			var objs []runtime.Object
-			if tt.existingExternalIPPool != nil {
-				objs = append(objs, tt.existingExternalIPPool)
+			for _, pool := range tt.existingExternalIPPools {
+				objs = append(objs, pool)
 			}
 			controller := newController(nil, objs)
 			controller.informerFactory.Start(stopCh)

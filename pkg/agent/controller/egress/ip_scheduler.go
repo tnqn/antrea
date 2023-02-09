@@ -15,6 +15,8 @@
 package egress
 
 import (
+	"fmt"
+	"reflect"
 	"sort"
 	"strconv"
 	"sync"
@@ -185,7 +187,8 @@ func (s *egressIPScheduler) updateEgress(old, cur interface{}) {
 	if !isEgressSchedulable(oldEgress) && !isEgressSchedulable(curEgress) {
 		return
 	}
-	if oldEgress.Spec.EgressIP == curEgress.Spec.EgressIP && oldEgress.Spec.ExternalIPPool == curEgress.Spec.ExternalIPPool {
+	if (oldEgress.Spec.EgressIP == curEgress.Spec.EgressIP && oldEgress.Spec.ExternalIPPool == curEgress.Spec.ExternalIPPool) &&
+		(reflect.DeepEqual(oldEgress.Spec.EgressIPs, curEgress.Spec.EgressIPs) && reflect.DeepEqual(oldEgress.Spec.ExternalIPPools, curEgress.Spec.ExternalIPPools)) {
 		return
 	}
 	s.queue.Add(workItem)
@@ -339,27 +342,58 @@ func (s *egressIPScheduler) schedule() {
 			continue
 		}
 
+		var node string
+		var err error
+		candidateEgressIP := egress.Spec.EgressIP
 		maxEgressIPsFilter := func(node string) bool {
 			// Count the Egress IPs that are already assigned to this Node.
 			ipsOnNode, _ := nodeToIPs[node]
 			numIPs := ipsOnNode.Len()
 			// Check if this Node can accommodate the new Egress IP.
-			if !ipsOnNode.Has(egress.Spec.EgressIP) {
+			if !ipsOnNode.Has(candidateEgressIP) {
 				numIPs += 1
 			}
 			return numIPs <= s.getMaxEgressIPsByNode(node)
 		}
-		node, err := s.cluster.SelectNodeForIP(egress.Spec.EgressIP, egress.Spec.ExternalIPPool, maxEgressIPsFilter)
-		if err != nil {
-			if err == memberlist.ErrNoNodeAvailable {
-				klog.InfoS("No Node is eligible for Egress", "egress", klog.KObj(egress))
-			} else {
-				klog.ErrorS(err, "Failed to select Node for Egress", "egress", klog.KObj(egress))
+
+		if egress.Spec.EgressIP != "" {
+			node, err = s.cluster.SelectNodeForIP(candidateEgressIP, egress.Spec.ExternalIPPool, maxEgressIPsFilter)
+			if err != nil {
+				if err == memberlist.ErrNoNodeAvailable {
+					klog.InfoS("No Node is eligible for Egress", "egress", klog.KObj(egress))
+				} else {
+					klog.ErrorS(err, "Failed to select Node for Egress", "egress", klog.KObj(egress))
+				}
+				continue
 			}
-			continue
+		} else {
+			selectEgressIP := func() error {
+				for i, egressIP := range egress.Spec.EgressIPs {
+					candidateEgressIP = egressIP
+					if candidateEgressIP == "" || len(egress.Spec.ExternalIPPools) <= i {
+						continue
+					}
+					node, err = s.cluster.SelectNodeForIP(candidateEgressIP, egress.Spec.ExternalIPPools[i], maxEgressIPsFilter)
+					if err != nil {
+						// only if all the Nodes in the externalIPPool are not available, goto next externalIPPool
+						if err == memberlist.ErrNoNodeAvailable {
+							klog.InfoS("No Node is eligible in ExternalIPPool", "externalIPPool", egress.Spec.ExternalIPPools[i], "egress", klog.KObj(egress))
+						} else {
+							klog.ErrorS(err, "Failed to select Node for EgressIP/ExternalIPPool", "ExternalIPPool", egress.Spec.ExternalIPPools[i], "EgressIP", egressIP, "egress", klog.KObj(egress))
+						}
+						continue
+					}
+					return nil
+				}
+				return fmt.Errorf("no Node is eligible in all ExternalIPPools")
+			}
+			if err = selectEgressIP(); err != nil {
+				klog.ErrorS(err, "Failed to select Node for Egress", "egress", klog.KObj(egress))
+				continue
+			}
 		}
 		result := &scheduleResult{
-			ip:   egress.Spec.EgressIP,
+			ip:   candidateEgressIP,
 			node: node,
 		}
 		newResults[egress.Name] = result
@@ -369,7 +403,7 @@ func (s *egressIPScheduler) schedule() {
 			ips = sets.NewString()
 			nodeToIPs[node] = ips
 		}
-		ips.Insert(egress.Spec.EgressIP)
+		ips.Insert(candidateEgressIP)
 	}
 
 	func() {
