@@ -639,7 +639,7 @@ func TestSyncEgress(t *testing.T) {
 			defer c.mockController.Finish()
 
 			if tt.maxEgressIPsPerNode > 0 {
-				c.maxEgressIPsPerNode = tt.maxEgressIPsPerNode
+				c.egressIPScheduler.maxEgressIPsPerNode = tt.maxEgressIPsPerNode
 			}
 
 			stopCh := make(chan struct{})
@@ -649,6 +649,7 @@ func TestSyncEgress(t *testing.T) {
 			c.addEgressGroup(tt.existingEgressGroup)
 
 			tt.expectedCalls(c.mockOFClient, c.mockRouteClient, c.mockIPAssigner)
+			c.egressIPScheduler.schedule()
 			err := c.syncEgress(tt.existingEgress.Name)
 			assert.NoError(t, err)
 
@@ -666,6 +667,7 @@ func TestSyncEgress(t *testing.T) {
 				egress, _ := c.egressLister.Get(tt.newEgress.Name)
 				return reflect.DeepEqual(egress, tt.newEgress), nil
 			}))
+			c.egressIPScheduler.schedule()
 			err = c.syncEgress(tt.newEgress.Name)
 			assert.NoError(t, err)
 			// Call it one more time to ensure it's idempotent, no extra datapath calls are supposed to be made.
@@ -795,9 +797,6 @@ func TestSyncOverlappingEgress(t *testing.T) {
 	c.mockIPAssigner.EXPECT().UnassignIP(fakeLocalEgressIP1)
 	err = c.syncEgress(egress3.Name)
 	assert.NoError(t, err)
-
-	// egress1 and egress3 are expected to be triggered for resync because their status is updated.
-	checkQueueItemExistence(t, c.queue, egress1.Name, egress3.Name)
 
 	// After deleting egress1, pod1 and pod2 no longer enforces egress1. The Egress IP shouldn't be released as egress3
 	// is still referring to it.
