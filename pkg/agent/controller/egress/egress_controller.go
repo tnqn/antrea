@@ -30,6 +30,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/apimachinery/pkg/watch"
+	coreinformers "k8s.io/client-go/informers/core/v1"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/util/retry"
 	"k8s.io/client-go/util/workqueue"
@@ -158,6 +159,7 @@ func NewEgressController(
 	nodeTransportInterface string,
 	cluster memberlist.Interface,
 	egressInformer crdinformers.EgressInformer,
+	nodeInformers coreinformers.NodeInformer,
 	podUpdateSubscriber channel.Subscriber,
 	maxEgressIPsPerNode int,
 ) (*EgressController, error) {
@@ -186,7 +188,7 @@ func NewEgressController(
 	}
 	c.ipAssigner = ipAssigner
 
-	c.egressIPScheduler = NewEgressIPScheduler(cluster, egressInformer, maxEgressIPsPerNode)
+	c.egressIPScheduler = NewEgressIPScheduler(cluster, egressInformer, nodeInformers, maxEgressIPsPerNode)
 
 	c.egressInformer.AddIndexers(
 		cache.Indexers{

@@ -22,14 +22,18 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/rand"
 	"k8s.io/apimachinery/pkg/util/sets"
+	"k8s.io/client-go/informers"
+	"k8s.io/client-go/kubernetes/fake"
 
 	"antrea.io/antrea/pkg/agent/consistenthash"
 	"antrea.io/antrea/pkg/agent/memberlist"
+	agenttypes "antrea.io/antrea/pkg/agent/types"
 	crdv1a2 "antrea.io/antrea/pkg/apis/crd/v1alpha2"
 	fakeversioned "antrea.io/antrea/pkg/client/clientset/versioned/fake"
 	crdinformers "antrea.io/antrea/pkg/client/informers/externalversions"
@@ -98,6 +102,7 @@ func TestSchedule(t *testing.T) {
 		name                string
 		nodes               []string
 		maxEgressIPsPerNode int
+		nodeToMaxEgressIPs  map[string]int
 		expectedResults     map[string]*scheduleResult
 	}{
 		{
@@ -116,6 +121,26 @@ func TestSchedule(t *testing.T) {
 				"egressC": {
 					node: "node1",
 					ip:   "1.1.1.21",
+				},
+			},
+		},
+		{
+			name:                "node specific limit",
+			nodes:               []string{"node1", "node2", "node3"},
+			maxEgressIPsPerNode: 3,
+			nodeToMaxEgressIPs: map[string]int{
+				"node1": 0,
+				"node2": 2,
+				"node3": 0,
+			},
+			expectedResults: map[string]*scheduleResult{
+				"egressA": {
+					node: "node2",
+					ip:   "1.1.1.1",
+				},
+				"egressB": {
+					node: "node2",
+					ip:   "1.1.1.11",
 				},
 			},
 		},
@@ -162,9 +187,12 @@ func TestSchedule(t *testing.T) {
 			crdClient := fakeversioned.NewSimpleClientset(egresses...)
 			crdInformerFactory := crdinformers.NewSharedInformerFactory(crdClient, 0)
 			egressInformer := crdInformerFactory.Crd().V1alpha2().Egresses()
+			clientset := fake.NewSimpleClientset()
+			informerFactory := informers.NewSharedInformerFactory(clientset, 0)
+			nodeInformer := informerFactory.Core().V1().Nodes()
 
-			s := NewEgressIPScheduler(fakeCluster, egressInformer, tt.maxEgressIPsPerNode)
-
+			s := NewEgressIPScheduler(fakeCluster, egressInformer, nodeInformer, tt.maxEgressIPsPerNode)
+			s.nodeToMaxEgressIPs = tt.nodeToMaxEgressIPs
 			stopCh := make(chan struct{})
 			defer close(stopCh)
 			crdInformerFactory.Start(stopCh)
@@ -192,12 +220,17 @@ func BenchmarkSchedule(b *testing.B) {
 	crdClient := fakeversioned.NewSimpleClientset(egresses...)
 	crdInformerFactory := crdinformers.NewSharedInformerFactory(crdClient, 0)
 	egressInformer := crdInformerFactory.Crd().V1alpha2().Egresses()
+	clientset := fake.NewSimpleClientset()
+	informerFactory := informers.NewSharedInformerFactory(clientset, 0)
+	nodeInformer := informerFactory.Core().V1().Nodes()
 
-	s := NewEgressIPScheduler(fakeCluster, egressInformer, 10)
+	s := NewEgressIPScheduler(fakeCluster, egressInformer, nodeInformer, 10)
 	stopCh := make(chan struct{})
 	defer close(stopCh)
 	crdInformerFactory.Start(stopCh)
+	informerFactory.Start(stopCh)
 	crdInformerFactory.WaitForCacheSync(stopCh)
+	informerFactory.WaitForCacheSync(stopCh)
 
 	b.ResetTimer()
 
@@ -222,12 +255,27 @@ func TestRun(t *testing.T) {
 			Spec:       crdv1a2.EgressSpec{EgressIP: "1.1.1.21", ExternalIPPool: "pool1"},
 		},
 	}
+	node1 := &corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:        "node1",
+			Annotations: map[string]string{},
+		},
+	}
+	node2 := &corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:        "node2",
+			Annotations: map[string]string{},
+		},
+	}
 	fakeCluster := newFakeMemberlistCluster([]string{"node1", "node2"})
 	crdClient := fakeversioned.NewSimpleClientset(egresses...)
 	crdInformerFactory := crdinformers.NewSharedInformerFactory(crdClient, 0)
 	egressInformer := crdInformerFactory.Crd().V1alpha2().Egresses()
+	clientset := fake.NewSimpleClientset(node1, node2)
+	informerFactory := informers.NewSharedInformerFactory(clientset, 0)
+	nodeInformer := informerFactory.Core().V1().Nodes()
 
-	s := NewEgressIPScheduler(fakeCluster, egressInformer, 2)
+	s := NewEgressIPScheduler(fakeCluster, egressInformer, nodeInformer, 2)
 	egressUpdates := make(chan string, 10)
 	s.AddEventHandler(func(egress string) {
 		egressUpdates <- egress
@@ -235,7 +283,9 @@ func TestRun(t *testing.T) {
 	stopCh := make(chan struct{})
 	defer close(stopCh)
 	crdInformerFactory.Start(stopCh)
+	informerFactory.Start(stopCh)
 	crdInformerFactory.WaitForCacheSync(stopCh)
+	informerFactory.WaitForCacheSync(stopCh)
 
 	go s.Run(stopCh)
 
@@ -286,6 +336,17 @@ func TestRun(t *testing.T) {
 	assertReceivedItems(t, egressUpdates, sets.NewString("egressB", "egressD"))
 	assertScheduleResult(t, s, "egressB", "1.1.1.11", "node2", true)
 	assertScheduleResult(t, s, "egressC", "1.1.1.21", "node1", true)
+	assertScheduleResult(t, s, "egressD", "1.1.1.1", "node1", true)
+
+	// Set node1's max-egress-ips annotation to 1, egressD should be moved to node2.
+	updatedNode1 := node1.DeepCopy()
+	updatedNode1.Annotations[agenttypes.NodeMaxEgressIPsAnnotationKey] = "1"
+	clientset.CoreV1().Nodes().Update(ctx, updatedNode1, metav1.UpdateOptions{})
+	assertReceivedItems(t, egressUpdates, sets.NewString("egressD"))
+	assertScheduleResult(t, s, "egressD", "1.1.1.1", "node2", true)
+	// Unset node1's max-egress-ips annotation, egressD should be moved to node1.
+	clientset.CoreV1().Nodes().Update(ctx, node1, metav1.UpdateOptions{})
+	assertReceivedItems(t, egressUpdates, sets.NewString("egressD"))
 	assertScheduleResult(t, s, "egressD", "1.1.1.1", "node1", true)
 }
 

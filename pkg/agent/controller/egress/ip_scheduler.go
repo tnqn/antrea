@@ -16,16 +16,20 @@ package egress
 
 import (
 	"sort"
+	"strconv"
 	"sync"
 	"sync/atomic"
 
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/util/sets"
+	corev1informers "k8s.io/client-go/informers/core/v1"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/util/workqueue"
 	"k8s.io/klog/v2"
 
 	"antrea.io/antrea/pkg/agent/memberlist"
+	"antrea.io/antrea/pkg/agent/types"
 	crdv1a2 "antrea.io/antrea/pkg/apis/crd/v1alpha2"
 	crdinformers "antrea.io/antrea/pkg/client/informers/externalversions/crd/v1alpha2"
 	crdlisters "antrea.io/antrea/pkg/client/listers/crd/v1alpha2"
@@ -69,9 +73,12 @@ type egressIPScheduler struct {
 
 	// The maximum number of Egress IPs a Node can accommodate.
 	maxEgressIPsPerNode int
+
+	nodeToMaxEgressIPs      map[string]int
+	nodeToMaxEgressIPsMutex sync.RWMutex
 }
 
-func NewEgressIPScheduler(cluster memberlist.Interface, egressInformer crdinformers.EgressInformer, maxEgressIPsPerNode int) *egressIPScheduler {
+func NewEgressIPScheduler(cluster memberlist.Interface, egressInformer crdinformers.EgressInformer, nodeInformer corev1informers.NodeInformer, maxEgressIPsPerNode int) *egressIPScheduler {
 	s := &egressIPScheduler{
 		cluster:             cluster,
 		egressLister:        egressInformer.Lister(),
@@ -79,6 +86,7 @@ func NewEgressIPScheduler(cluster memberlist.Interface, egressInformer crdinform
 		scheduleResults:     map[string]*scheduleResult{},
 		scheduledOnce:       &atomic.Bool{},
 		maxEgressIPsPerNode: maxEgressIPsPerNode,
+		nodeToMaxEgressIPs:  map[string]int{},
 		queue:               workqueue.New(),
 	}
 	egressInformer.Informer().AddEventHandlerWithResyncPeriod(
@@ -89,12 +97,76 @@ func NewEgressIPScheduler(cluster memberlist.Interface, egressInformer crdinform
 		},
 		resyncPeriod,
 	)
+	nodeInformer.Informer().AddEventHandlerWithResyncPeriod(
+		cache.ResourceEventHandlerFuncs{
+			AddFunc: s.updateNode,
+			UpdateFunc: func(_, newObj interface{}) {
+				s.updateNode(newObj)
+			},
+			DeleteFunc: s.deleteNode,
+		},
+		resyncPeriod,
+	)
 
 	s.cluster.AddClusterEventHandler(func(poolName string) {
 		// Trigger scheduling regardless of which pool is changed.
 		s.queue.Add(workItem)
 	})
 	return s
+}
+
+func getMaxEgressIPsFromAnnotation(node *corev1.Node) (int, bool, error) {
+	maxEgressIPsStr, exists := node.Annotations[types.NodeMaxEgressIPsAnnotationKey]
+	if !exists {
+		return 0, false, nil
+	}
+	maxEgressIPs, err := strconv.Atoi(maxEgressIPsStr)
+	if err != nil {
+		return 0, false, err
+	}
+	return maxEgressIPs, true, nil
+}
+
+// updateNode processes Node ADD and UPDATE events.
+func (s *egressIPScheduler) updateNode(obj interface{}) {
+	node := obj.(*corev1.Node)
+	maxEgressIPs, found, err := getMaxEgressIPsFromAnnotation(node)
+	if err != nil {
+		klog.ErrorS(err, "The Node's max-egress-ips annotation was invalid", "node", node.Name)
+		if s.deleteMaxEgressIPsByNode(node.Name) {
+			s.queue.Add(workItem)
+		}
+		return
+	}
+	if !found {
+		if s.deleteMaxEgressIPsByNode(node.Name) {
+			s.queue.Add(workItem)
+		}
+		return
+	}
+	if s.updateMaxEgressIPsByNode(node.Name, maxEgressIPs) {
+		s.queue.Add(workItem)
+	}
+}
+
+// updateNode processes Node DELETE events.
+func (s *egressIPScheduler) deleteNode(obj interface{}) {
+	node, ok := obj.(*corev1.Node)
+	if !ok {
+		deletedState, ok := obj.(cache.DeletedFinalStateUnknown)
+		if !ok {
+			klog.Errorf("Received unexpected object: %v", obj)
+			return
+		}
+		node, ok = deletedState.Obj.(*corev1.Node)
+		if !ok {
+			klog.Errorf("DeletedFinalStateUnknown contains non-Node object: %v", deletedState.Obj)
+			return
+		}
+	}
+	if s.deleteMaxEgressIPsByNode(node.Name) {
+		s.queue.Add(workItem)
+	}
 }
 
 // addEgress processes Egress ADD events.
@@ -200,6 +272,40 @@ func (o EgressesByCreationTimestamp) Less(i, j int) bool {
 	return o[i].CreationTimestamp.Before(&o[j].CreationTimestamp)
 }
 
+func (s *egressIPScheduler) updateMaxEgressIPsByNode(nodeName string, maxEgressIPs int) bool {
+	s.nodeToMaxEgressIPsMutex.Lock()
+	defer s.nodeToMaxEgressIPsMutex.Unlock()
+
+	oldMaxEgressIPs, exists := s.nodeToMaxEgressIPs[nodeName]
+	s.nodeToMaxEgressIPs[nodeName] = maxEgressIPs
+	if exists && oldMaxEgressIPs == maxEgressIPs {
+		return false
+	}
+	return true
+}
+
+func (s *egressIPScheduler) deleteMaxEgressIPsByNode(nodeName string) bool {
+	s.nodeToMaxEgressIPsMutex.Lock()
+	defer s.nodeToMaxEgressIPsMutex.Unlock()
+
+	_, exists := s.nodeToMaxEgressIPs[nodeName]
+	if exists {
+		delete(s.nodeToMaxEgressIPs, nodeName)
+	}
+	return exists
+}
+
+func (s *egressIPScheduler) getMaxEgressIPsByNode(nodeName string) int {
+	s.nodeToMaxEgressIPsMutex.RLock()
+	defer s.nodeToMaxEgressIPsMutex.RUnlock()
+
+	maxEgressIPs, exists := s.nodeToMaxEgressIPs[nodeName]
+	if !exists {
+		return s.maxEgressIPsPerNode
+	}
+	return maxEgressIPs
+}
+
 // schedule takes the spec of Egress and ExternalIPPool and the state of memberlist cluster as inputs, generates
 // scheduling results deterministically. When every Node's capacity is sufficient, each Egress's schedule is independent
 // and is only determined by the consistent hash map. When any Node's capacity is insufficient, one Egress's schedule
@@ -231,7 +337,7 @@ func (s *egressIPScheduler) schedule() {
 			if !ipsOnNode.Has(egress.Spec.EgressIP) {
 				numIPs += 1
 			}
-			return numIPs <= s.maxEgressIPsPerNode
+			return numIPs <= s.getMaxEgressIPsByNode(node)
 		}
 		node, err := s.cluster.SelectNodeForIP(egress.Spec.EgressIP, egress.Spec.ExternalIPPool, maxEgressIPsFilter)
 		if err != nil {
