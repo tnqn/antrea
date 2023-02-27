@@ -83,7 +83,7 @@ func TestEgressControllerValidateEgress(t *testing.T) {
 			expectedResponse: &admv1.AdmissionResponse{
 				Allowed: false,
 				Result: &metav1.Status{
-					Message: "IP 10.10.11.1 is not within the IP range",
+					Message: "IP 10.10.11.1 is not within the IP range of ExternalIPPool bar",
 				},
 			},
 		},
@@ -101,7 +101,7 @@ func TestEgressControllerValidateEgress(t *testing.T) {
 			expectedResponse: &admv1.AdmissionResponse{
 				Allowed: false,
 				Result: &metav1.Status{
-					Message: "IP 10.10.11.1 is not within the IP range",
+					Message: "IP 10.10.11.1 is not within the IP range of ExternalIPPool bar",
 				},
 			},
 		},
@@ -126,13 +126,12 @@ func TestEgressControllerValidateEgress(t *testing.T) {
 			expectedResponse: &admv1.AdmissionResponse{
 				Allowed: false,
 				Result: &metav1.Status{
-					Message: "IPs number [10.10.10.1 2.2.2.2] is larger than ExternalIPPools [bar] number",
+					Message: "The count of EgressIPs 2 must not be greater than the count of ExternalIPPools 1",
 				},
 			},
 		},
 		{
-			name:                    "Requesting ExternalIPPools is empty and EgressIPs num larger than 1 should not be allowed[multi-pools]",
-			existingExternalIPPools: nil,
+			name: "Requesting ExternalIPPools is empty and EgressIPs num larger than 1 should not be allowed[multi-pools]",
 			request: &admv1.AdmissionRequest{
 				Name:      "foo",
 				Operation: "CREATE",
@@ -141,7 +140,7 @@ func TestEgressControllerValidateEgress(t *testing.T) {
 			expectedResponse: &admv1.AdmissionResponse{
 				Allowed: false,
 				Result: &metav1.Status{
-					Message: "Invalid EgressIPs [10.10.10.1 2.2.2.2], only one EgressIP in EgressIPs is supported while ExternalIPPools num is 0",
+					Message: "EgressIP, ExternalIPPool, and ExternalIPPools must not be empty at the same time",
 				},
 			},
 		},
@@ -198,7 +197,7 @@ func TestEgressControllerValidateEgress(t *testing.T) {
 			expectedResponse: &admv1.AdmissionResponse{
 				Allowed: false,
 				Result: &metav1.Status{
-					Message: "Invalid ExternalIPPool: ",
+					Message: "The items of ExternalIPPools must not be empty",
 				},
 			},
 		},
@@ -215,7 +214,7 @@ func TestEgressControllerValidateEgress(t *testing.T) {
 			expectedResponse: &admv1.AdmissionResponse{
 				Allowed: false,
 				Result: &metav1.Status{
-					Message: "Duplicate ExternalIPPool bar in ExternalIPPools",
+					Message: "The items of ExternalIPPools must be unique",
 				},
 			},
 		},
@@ -231,7 +230,7 @@ func TestEgressControllerValidateEgress(t *testing.T) {
 			expectedResponse: &admv1.AdmissionResponse{
 				Allowed: false,
 				Result: &metav1.Status{
-					Message: "IP 10.10.11.1 is not within the IP range",
+					Message: "IP 10.10.11.1 is not within the IP range of ExternalIPPool bar",
 				},
 			},
 		},

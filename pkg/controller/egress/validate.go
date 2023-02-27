@@ -17,6 +17,7 @@ package egress
 import (
 	"encoding/json"
 	"fmt"
+	"k8s.io/apimachinery/pkg/util/sets"
 	"net"
 	"reflect"
 
@@ -55,62 +56,55 @@ func (c *EgressController) ValidateEgress(review *admv1.AdmissionReview) *admv1.
 			reflect.DeepEqual(newEgress.Spec.ExternalIPPools, oldEgress.Spec.ExternalIPPools) {
 			return true, ""
 		}
-		poolsValidate := func(pools []string) bool {
-			specEgressIPs := make(map[string]bool)
-			for _, pool := range pools {
-				if pool == "" {
-					return false
-				}
-				if specEgressIPs[pool] {
-					return false
-				}
-				specEgressIPs[pool] = true
-			}
-			return true
-		}
-		// Only validate whether the specified Egress IP is in the Pool when they are both set.
-		if (newEgress.Spec.EgressIP == "" || newEgress.Spec.ExternalIPPool == "") && ((len(newEgress.Spec.EgressIPs) == 0 && poolsValidate(newEgress.Spec.ExternalIPPools)) || (len(newEgress.Spec.ExternalIPPools) == 0 && len(newEgress.Spec.EgressIPs) == 1)) {
-			return true, ""
-		}
-		specEgressIPs := make(map[string]string)
-		defineMultiExternalIPPool := false
-		if newEgress.Spec.ExternalIPPool != "" {
-			specEgressIPs[newEgress.Spec.ExternalIPPool] = newEgress.Spec.EgressIP
-		} else {
-			defineMultiExternalIPPool = true
-			if len(newEgress.Spec.ExternalIPPools) == 0 {
-				return false, fmt.Sprintf("Invalid EgressIPs %+v, only one EgressIP in EgressIPs is supported while ExternalIPPools num is 0", newEgress.Spec.EgressIPs)
-			}
-			if len(newEgress.Spec.EgressIPs) > len(newEgress.Spec.ExternalIPPools) {
-				return false, fmt.Sprintf("IPs number %+v is larger than ExternalIPPools %+v number", newEgress.Spec.EgressIPs, newEgress.Spec.ExternalIPPools)
-			}
-			for i, pool := range newEgress.Spec.ExternalIPPools {
-				if pool == "" {
-					return false, fmt.Sprintf("Invalid ExternalIPPool: %s", pool)
-				}
-				if _, has := specEgressIPs[pool]; has {
-					return false, fmt.Sprintf("Duplicate ExternalIPPool %s in ExternalIPPools", pool)
-				}
-				if i < len(newEgress.Spec.EgressIPs) {
-					specEgressIPs[pool] = newEgress.Spec.EgressIPs[i]
-				} else {
-					specEgressIPs[pool] = ""
-				}
-			}
-		}
-		for pool, ipStr := range specEgressIPs {
+		checkIPAndPool := func(ipStr, pool string) (bool, string) {
 			ip := net.ParseIP(ipStr)
+			if ip == nil {
+				return false, fmt.Sprintf("IP %s is not valid", ipStr)
+			}
 			if !c.externalIPAllocator.IPPoolExists(pool) {
 				return false, fmt.Sprintf("ExternalIPPool %s does not exist", pool)
 			}
-			if ip == nil {
-				if defineMultiExternalIPPool {
+			if !c.externalIPAllocator.IPPoolHasIP(pool, ip) {
+				return false, fmt.Sprintf("IP %s is not within the IP range of ExternalIPPool %s", ipStr, pool)
+			}
+			return true, ""
+		}
+		singleEgressIP := newEgress.Spec.EgressIP != "" || newEgress.Spec.ExternalIPPool != ""
+		if singleEgressIP {
+			// Only validate whether the specified Egress IP is in the Pool when they are both set.
+			if newEgress.Spec.EgressIP == "" || newEgress.Spec.ExternalIPPool == "" {
+				return true, ""
+			}
+			if allowed, message := checkIPAndPool(newEgress.Spec.EgressIP, newEgress.Spec.ExternalIPPool); !allowed {
+				return false, message
+			}
+		} else {
+			if len(newEgress.Spec.ExternalIPPools) == 0 {
+				return false, fmt.Sprintf("EgressIP, ExternalIPPool, and ExternalIPPools must not be empty at the same time")
+			}
+			if len(newEgress.Spec.EgressIPs) > len(newEgress.Spec.ExternalIPPools) {
+				return false, fmt.Sprintf("The count of EgressIPs %d must not be greater than the count of ExternalIPPools %d", len(newEgress.Spec.EgressIPs), len(newEgress.Spec.ExternalIPPools))
+			}
+			visitedPools := sets.NewString()
+			for i, pool := range newEgress.Spec.ExternalIPPools {
+				if pool == "" {
+					return false, fmt.Sprintf("The items of ExternalIPPools must not be empty")
+				}
+				if visitedPools.Has(pool) {
+					return false, fmt.Sprintf("The items of ExternalIPPools must be unique")
+				}
+				visitedPools.Insert(pool)
+				if len(newEgress.Spec.EgressIPs) <= i {
 					continue
 				}
-				return false, fmt.Sprintf("IP %s is not valid", ipStr)
-			}
-			if !c.externalIPAllocator.IPPoolHasIP(pool, ip) {
-				return false, fmt.Sprintf("IP %s is not within the IP range", ipStr)
+				ipStr := newEgress.Spec.EgressIPs[i]
+				// Allow empty IP in EgressIPs as IP allocation may fail for some pools but succeed for other pools.
+				if ipStr == "" {
+					continue
+				}
+				if allowed, message := checkIPAndPool(ipStr, pool); !allowed {
+					return false, message
+				}
 			}
 		}
 		return true, ""

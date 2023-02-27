@@ -93,6 +93,7 @@ spec:
                 items:
                   type: string
                   oneOf:
+                    - maxLength: 0
                     - format: ipv4
                     - format: ipv6
               externalIPPool:
