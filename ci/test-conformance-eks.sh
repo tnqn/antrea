@@ -22,7 +22,7 @@ function echoerr {
 
 CLUSTER=""
 REGION="us-west-2"
-K8S_VERSION="1.21"
+K8S_VERSION="1.22"
 AWS_NODE_TYPE="t3.medium"
 SSH_KEY_PATH="$HOME/.ssh/id_rsa.pub"
 SSH_PRIVATE_KEY_PATH="$HOME/.ssh/id_rsa"
