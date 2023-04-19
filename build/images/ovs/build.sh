@@ -31,6 +31,7 @@ Build the antrea openvswitch image.
         --distro <distro>           Target Linux distribution
         --download-ovs              Download OVS source code tarball from internet. Default is false.
         --ipsec                     Build with IPsec support. Default is false.
+        --use-public-photon         Use public Photon repository. Should only be used in CI and for local testing.
         --rpm-repo-url <url>        URL of the RPM repository to use for Photon builds."
 
 function print_usage {
@@ -44,7 +45,9 @@ PLATFORM=""
 DISTRO="ubuntu"
 DOWNLOAD_OVS=false
 RPM_REPO_URL=""
+USE_PUBLIC_PHOTON=false
 SUPPORT_DISTROS=("ubuntu" "ubi" "debian" "photon")
+PHOTON_BASE_DOCKER_IMG="harbor-repo.vmware.com/dockerhub-proxy-cache/library/photon:3.0"
 
 while [[ $# -gt 0 ]]
 do
@@ -78,6 +81,10 @@ case $key in
     --rpm-repo-url)
     RPM_REPO_URL="$2"
     shift 2
+    ;;
+    --use-public-photon)
+    USE_PUBLIC_PHOTON=true
+    shift
     ;;
     -h|--help)
     print_usage
@@ -124,7 +131,18 @@ if [ "$IPSEC" == "true" ]; then
     BUILD_TAG="${BUILD_TAG}-ipsec"
 fi
 
-if $DOWNLOAD_OVS; then
+if [ "$DISTRO" == "photon" ]; then
+    if [ "$RPM_REPO_URL" != "" ] && ${USE_PUBLIC_PHOTON}; then
+        echoerr "Cannot use --rpm-repo-url with --use-public-photon"
+        exit 1
+    fi
+    if ${USE_PUBLIC_PHOTON}; then
+        docker pull $PLATFORM_ARG $PHOTON_BASE_DOCKER_IMG
+        docker export $(docker create $PHOTON_BASE_DOCKER_IMG) | gzip > photon-rootfs.tar.gz
+    fi
+fi
+
+if $DOWNLOAD_OVS && ! [ -f openvswitch-$OVS_VERSION.tar.gz ]; then
     curl -LO https://www.openvswitch.org/releases/openvswitch-$OVS_VERSION.tar.gz
 elif [ ! -f openvswitch-$OVS_VERSION.tar.gz ]; then
     echoerr "openvswitch-$OVS_VERSION.tar.gz not found. Use --download-ovs true to download it."
@@ -216,8 +234,8 @@ elif [ "$DISTRO" == "debian" ];then
            -f Dockerfile.debian .
 
 elif [ "$DISTRO" == "photon" ]; then
-    if [ "$RPM_REPO_URL" == "" ]; then
-        echoerr "Must specify --rpm-repo-url when building for Photon"
+    if [ "$RPM_REPO_URL" == "" ] && ! ${USE_PUBLIC_PHOTON} ; then
+        echoerr "Must specify --rpm-repo-url or --use-public-photon"
         exit 1
     fi
     if [ "$IPSEC" == "true" ]; then
