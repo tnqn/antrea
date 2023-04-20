@@ -238,10 +238,6 @@ elif [ "$DISTRO" == "photon" ]; then
         echoerr "Must specify --rpm-repo-url or --use-public-photon"
         exit 1
     fi
-    if [ "$IPSEC" == "true" ]; then
-        echoerr "IPsec is not supported for Photon"
-        exit 1
-    fi
     if ! [ -f "photon-rootfs.tar.gz" ]; then
         echoerr "photon-rootfs.tar.gz not found."
         exit 1
@@ -251,6 +247,7 @@ elif [ "$DISTRO" == "photon" ]; then
            -t antrea/openvswitch-photon-rpms:$BUILD_TAG \
            --build-arg OVS_VERSION=$OVS_VERSION \
            --build-arg RPM_REPO_URL=$RPM_REPO_URL \
+           --build-arg IPSEC=$IPSEC \
            -f Dockerfile.photon .
 
     docker build $PLATFORM_ARG \
@@ -259,6 +256,7 @@ elif [ "$DISTRO" == "photon" ]; then
            -t antrea/openvswitch-photon:$BUILD_TAG \
            --build-arg OVS_VERSION=$OVS_VERSION \
            --build-arg RPM_REPO_URL=$RPM_REPO_URL \
+           --build-arg IPSEC=$IPSEC \
            -f Dockerfile.photon .
 
 elif [ "$DISTRO" == "ubi" ]; then
