@@ -15,7 +15,7 @@ NANOSERVER_VERSION := $(shell head -n 1 build/images/deps/nanoserver-version)
 BUILD_TAG          := $(shell build/images/build-tag.sh)
 WIN_BUILD_TAG      := $(shell echo $(GO_VERSION) $(CNI_BINARIES_VERSION) $(NANOSERVER_VERSION)|md5sum|head -c 10)
 GIT_HOOKS          := $(shell find hack/git_client_side_hooks -type f -print)
-DOCKER_NETWORK     ?= default
+DOCKER_NETWORK     ?= host
 TRIVY_TARGET_IMAGE ?=
 
 GOLANGCI_LINT_VERSION := v1.50.1
