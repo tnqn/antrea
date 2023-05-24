@@ -36,6 +36,7 @@ _usage="Usage: $0 [--encap-mode <mode>] [--ip-family <v4|v6>] [--coverage] [--he
         --setup-only                  Only perform setting up the cluster and run test.
         --cleanup-only                Only perform cleaning up the cluster.
         --test-only                   Only run test on current cluster. Not set up/clean up the cluster.
+        --k8s-version                 Specifies the Kubernetes version of the kind cluster, kind's default K8s version will be used if empty.
         --help, -h                    Print this message and exit.
 "
 
@@ -73,6 +74,7 @@ setup_only=false
 cleanup_only=false
 test_only=false
 run=""
+k8s_version=""
 while [[ $# -gt 0 ]]
 do
 key="$1"
@@ -128,6 +130,10 @@ case $key in
     ;;
     --test-only)
     test_only=true
+    shift
+    ;;
+    --k8s-version)
+    k8s_version="$2"
     shift
     ;;
     -h|--help)
@@ -214,6 +220,9 @@ function setup_cluster {
   fi
   if $node_ipam; then
     args="$args --no-kube-node-ipam"
+  fi
+  if $k8s_version; then
+    args="$args --k8s-version $k8s_version"
   fi
 
   echo "creating test bed with args $args"
