@@ -374,7 +374,11 @@ func (c *ServiceExternalIPController) syncService(key apimachinerytypes.Namespac
 	if err != nil {
 		if err == memberlist.ErrNoNodeAvailable {
 			// No Node is available at the moment. The Service will be requeued by Endpoints, Node, or Memberlist update events.
-			klog.InfoS("No Node available", "ip", currentExternalIP, "ipPool", ipPool)
+			klog.InfoS("No Node was eligible for external IP", "ip", currentExternalIP, "ipPool", ipPool)
+			return nil
+		} else if err == memberlist.ErrNodePoolNotInitialized {
+			// Node pool is not initialized at the moment. The Service will be requeued after the pool is ready.
+			klog.InfoS("Node pool for external IP was not initialized yet", "ip", currentExternalIP, "ipPool", ipPool)
 			return nil
 		}
 		return err

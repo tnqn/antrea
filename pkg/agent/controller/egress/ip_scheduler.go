@@ -352,7 +352,9 @@ func (s *egressIPScheduler) schedule() {
 		node, err := s.cluster.SelectNodeForIP(egress.Spec.EgressIP, egress.Spec.ExternalIPPool, maxEgressIPsFilter)
 		if err != nil {
 			if err == memberlist.ErrNoNodeAvailable {
-				klog.InfoS("No Node is eligible for Egress", "egress", klog.KObj(egress))
+				klog.InfoS("No Node was eligible for Egress", "egress", klog.KObj(egress))
+			} else if err == memberlist.ErrNodePoolNotInitialized {
+				klog.InfoS("Node pool for Egress was not initialized yet", "egress", klog.KObj(egress))
 			} else {
 				klog.ErrorS(err, "Failed to select Node for Egress", "egress", klog.KObj(egress))
 			}

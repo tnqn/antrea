@@ -22,11 +22,13 @@ import (
 	"time"
 
 	"github.com/golang/mock/gomock"
+	"github.com/hashicorp/go-multierror"
 	"github.com/hashicorp/memberlist"
 	"github.com/stretchr/testify/assert"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	utilerrors "k8s.io/apimachinery/pkg/util/errors"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes/fake"
@@ -676,4 +678,40 @@ func TestCluster_RejoinNodes(t *testing.T) {
 	})
 	mockMemberlist.EXPECT().Join([]string{"10.0.0.2"})
 	fakeCluster.cluster.RejoinNodes()
+}
+
+func TestConvertMultiErrors(t *testing.T) {
+	err1 := fmt.Errorf("err1")
+	err2 := fmt.Errorf("err2")
+	tests := []struct {
+		name    string
+		err     error
+		wantErr error
+	}{
+		{
+			name:    "multiple errors",
+			err:     multierror.Append(err1, err2),
+			wantErr: utilerrors.NewAggregate([]error{err1, err2}),
+		},
+		{
+			name:    "single error",
+			err:     multierror.Append(err1),
+			wantErr: utilerrors.NewAggregate([]error{err1}),
+		},
+		{
+			name:    "normal error",
+			err:     err1,
+			wantErr: err1,
+		},
+		{
+			name:    "nil",
+			err:     nil,
+			wantErr: nil,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.wantErr, convertMultiErrors(tt.err))
+		})
+	}
 }

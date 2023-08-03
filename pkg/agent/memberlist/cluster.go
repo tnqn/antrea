@@ -23,11 +23,13 @@ import (
 	"sync"
 	"time"
 
+	"github.com/hashicorp/go-multierror"
 	"github.com/hashicorp/memberlist"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
+	utilerrors "k8s.io/apimachinery/pkg/util/errors"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/apimachinery/pkg/util/wait"
 	coreinformers "k8s.io/client-go/informers/core/v1"
@@ -63,6 +65,10 @@ const (
 
 // ErrNoNodeAvailable is the error returned if no Node is chosen in SelectNodeForIP and ShouldSelectIP.
 var ErrNoNodeAvailable = errors.New("no Node available")
+
+// ErrNodePoolNotInitialized is the error returned if the Node pool for the ExternalIPPool is not initialized yet.
+// It's usually temporary.
+var ErrNodePoolNotInitialized = errors.New("Node pool not initialized")
 
 type nodeEventType string
 
@@ -203,16 +209,17 @@ func NewCluster(
 func (c *Cluster) handleCreateNode(obj interface{}) {
 	node := obj.(*corev1.Node)
 	// Ignore the Node itself.
-	if node.Name != c.nodeName {
-		if member, err := c.newClusterMember(node); err == nil {
-			_, err := c.mList.Join([]string{member})
-			if err != nil {
-				klog.ErrorS(err, "Processing Node CREATE event error, join cluster failed", "member", member)
-			}
-		} else {
-			klog.ErrorS(err, "Processing Node CREATE event error", "nodeName", node.Name)
-		}
-	}
+	//if node.Name != c.nodeName {
+	//	if member, err := c.newClusterMember(node); err == nil {
+	//		_, err := c.mList.Join([]string{member})
+	//		if err != nil {
+	//			klog.InfoS("Failed to join new Node")
+	//			klog.ErrorS(convertMultiErrors(err), "Processing Node CREATE event error, join cluster failed", "member", member)
+	//		}
+	//	} else {
+	//		klog.ErrorS(err, "Processing Node CREATE event error", "nodeName", node.Name)
+	//	}
+	//}
 
 	affectedEIPs := c.filterEIPsFromNodeLabels(node)
 	c.enqueueExternalIPPools(affectedEIPs)
@@ -336,17 +343,18 @@ func (c *Cluster) Run(stopCh <-chan struct{}) {
 	}()
 
 	// Rejoin Nodes periodically in case some Nodes are removed from the member list because of long downtime.
-	go func() {
-		ticker := time.NewTicker(1 * time.Minute)
-		for {
-			select {
-			case <-stopCh:
-				return
-			case <-ticker.C:
-				c.RejoinNodes()
-			}
-		}
-	}()
+	//go func() {
+	//	ticker := time.NewTicker(1 * time.Minute)
+	//	for {
+	//		select {
+	//		case <-stopCh:
+	//			return
+	//		case <-ticker.C:
+	//			c.RejoinNodes()
+	//		}
+	//	}
+	//}()
+	go wait.Until(c.RejoinNodes, time.Minute, stopCh)
 
 	<-stopCh
 }
@@ -373,14 +381,26 @@ func (c *Cluster) RejoinNodes() {
 	if len(membersToJoin) == 0 {
 		return
 	}
+	klog.InfoS("Joining cluster members", "members", membersToJoin)
 	// The Join method returns an error only when none could be reached.
 	numSuccess, err := c.mList.Join(membersToJoin)
 	if err != nil {
-		klog.ErrorS(err, "Failed to rejoin any members", "members", membersToJoin)
+		klog.ErrorS(convertMultiErrors(err), "Failed to rejoin any members", "members", membersToJoin)
 	} else if numSuccess != len(membersToJoin) {
 		klog.ErrorS(err, "Failed to rejoin some members", "members", membersToJoin, "numSuccess", numSuccess)
 	} else {
 		klog.InfoS("Rejoined all members", "members", membersToJoin)
+	}
+}
+
+// convertMultiErrors converts the given error to utilerrors.Aggregate if it's a *multierror.Error to avoid inconsistent
+// logging style caused by the latter.
+func convertMultiErrors(err error) error {
+	switch e := err.(type) {
+	case *multierror.Error:
+		return utilerrors.NewAggregate(e.Errors)
+	default:
+		return e
 	}
 }
 
@@ -483,14 +503,14 @@ func (c *Cluster) handleClusterNodeEvents(nodeEvent *memberlist.NodeEvent) {
 		if err != nil {
 			// It means the Node has been deleted, no further processing is needed as handleDeleteNode has enqueued
 			// related ExternalIPPools.
-			klog.InfoS("Received a Node event but did not find the Node object", "eventType", mapNodeEventType[event], "nodeName", node.Name)
+			klog.InfoS("Received a Node event but did not find the Node object", "eventType", mapNodeEventType[event], "nodeName", node.Name, "nodeIP", node.Addr)
 			return
 		}
 		affectedEIPs := c.filterEIPsFromNodeLabels(coreNode)
 		c.enqueueExternalIPPools(affectedEIPs)
-		klog.InfoS("Processed Node event", "eventType", mapNodeEventType[event], "nodeName", node.Name, "affectedExternalIPPoolNum", len(affectedEIPs))
+		klog.InfoS("Processed Node event", "eventType", mapNodeEventType[event], "nodeName", node.Name, "nodeIP", node.Addr, "affectedExternalIPPoolNum", len(affectedEIPs))
 	default:
-		klog.InfoS("Processed Node event", "eventType", mapNodeEventType[event], "nodeName", node.Name)
+		klog.InfoS("Processed Node event", "eventType", mapNodeEventType[event], "nodeName", node.Name, "nodeIP", node.Addr)
 	}
 }
 
@@ -515,7 +535,7 @@ func (c *Cluster) ShouldSelectIP(ip, externalIPPool string, filters ...func(stri
 	defer c.consistentHashRWMutex.RUnlock()
 	consistentHash, ok := c.consistentHashMap[externalIPPool]
 	if !ok {
-		return false, fmt.Errorf("local Node consistentHashMap has not synced, ExternalIPPool %s", externalIPPool)
+		return false, ErrNodePoolNotInitialized
 	}
 	node := consistentHash.GetWithFilters(ip, filters...)
 	return node == c.nodeName, nil
@@ -530,7 +550,7 @@ func (c *Cluster) SelectNodeForIP(ip, externalIPPool string, filters ...func(str
 	defer c.consistentHashRWMutex.RUnlock()
 	consistentHash, ok := c.consistentHashMap[externalIPPool]
 	if !ok {
-		return "", fmt.Errorf("local Node consistentHashMap has not synced, ExternalIPPool %s", externalIPPool)
+		return "", ErrNodePoolNotInitialized
 	}
 	node := consistentHash.GetWithFilters(ip, filters...)
 	if node == "" {
