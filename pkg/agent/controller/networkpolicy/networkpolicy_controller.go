@@ -15,8 +15,12 @@
 package networkpolicy
 
 import (
+	"antrea.io/antrea/pkg/agent/util/ipset"
+	"antrea.io/antrea/pkg/agent/util/iptables"
+	crdv1beta1 "antrea.io/antrea/pkg/apis/crd/v1beta1"
 	"context"
 	"fmt"
+	"k8s.io/apimachinery/pkg/util/intstr"
 	"net"
 	"reflect"
 	"sync"
@@ -484,6 +488,61 @@ func (c *Controller) Run(stopCh <-chan struct{}) {
 		return
 	}
 	klog.Info("Antrea client is ready")
+
+	ipt, _ := iptables.New(true, false)
+	ipset := ipset.NewClient()
+	hostPolicyReconciler := NewHostPolicyReconciler(ipt, ipset)
+	if err := hostPolicyReconciler.syncInfraRules(); err != nil {
+		klog.ErrorS(err, "Failed to syn infra rules")
+	}
+	tcp := v1beta2.ProtocolTCP
+	port80 := intstr.FromInt(80)
+	port81 := intstr.FromInt(81)
+	dropped := crdv1beta1.RuleActionDrop
+	rule := &CompletedRule{
+		rule: &rule{
+			ID:        "abcdef",
+			Direction: v1beta2.DirectionIn,
+			Services: []v1beta2.Service{
+				{
+					Protocol: &tcp,
+					Port:     &port80,
+				},
+				{
+					Protocol: &tcp,
+					Port:     &port81,
+				},
+			},
+			Name:       "abcdef",
+			Action:     &dropped,
+			PolicyUID:  "xyz",
+			PolicyName: "bar",
+			SourceRef: &v1beta2.NetworkPolicyReference{
+				Type:      v1beta2.AntreaNetworkPolicy,
+				Namespace: "foo",
+				Name:      "bar",
+				UID:       "xyz",
+			},
+		},
+		FromAddresses: v1beta2.NewGroupMemberSet(
+			&v1beta2.GroupMember{
+				IPs: []v1beta2.IPAddress{
+					v1beta2.IPAddress(net.ParseIP("1.1.1.1")),
+				},
+			},
+			&v1beta2.GroupMember{
+				IPs: []v1beta2.IPAddress{
+					v1beta2.IPAddress(net.ParseIP("172.18.0.1")),
+				},
+			},
+		),
+		ToAddresses:   nil,
+		TargetMembers: nil,
+		L7RuleVlanID:  nil,
+	}
+	if err := hostPolicyReconciler.Reconcile(rule); err != nil {
+		klog.ErrorS(err, "Failed to reconcile host policy")
+	}
 
 	// Use NonSlidingUntil so that normal reconnection (disconnected after
 	// running a while) can reconnect immediately while abnormal reconnection

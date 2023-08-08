@@ -48,6 +48,7 @@ const (
 	PreRoutingChain  = "PREROUTING"
 	ForwardChain     = "FORWARD"
 	PostRoutingChain = "POSTROUTING"
+	INPUTChain       = "INPUT"
 	OutputChain      = "OUTPUT"
 
 	waitSeconds              = 10
