@@ -2316,8 +2316,6 @@ func (f *featureEgress) snatRuleFlow(ofPort uint32, snatIP net.IP, snatMark uint
 		return EgressMarkTable.ofTable.BuildFlow(priorityNormal).
 			Cookie(cookieID).
 			MatchProtocol(ipProtocol).
-			MatchCTStateNew(true).
-			MatchCTStateTrk(true).
 			MatchInPort(ofPort).
 			Action().LoadPktMarkRange(snatMark, snatPktMarkRange).
 			Action().LoadRegMark(ToGatewayRegMark).
