@@ -539,6 +539,8 @@ type AppliedTo struct {
 	// Cannot be set with any other selector.
 	// +optional
 	Service *NamespacedName `json:"service,omitempty"`
+
+	NodeSelector *metav1.LabelSelector `json:"nodeSelector,omitempty"`
 }
 
 type PeerNamespaces struct {

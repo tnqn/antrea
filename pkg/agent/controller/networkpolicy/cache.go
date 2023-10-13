@@ -154,6 +154,16 @@ type CompletedRule struct {
 	L7RuleVlanID *uint32
 }
 
+func (r *CompletedRule) AppliedToNode() bool {
+	for _, member := range r.TargetMembers {
+		if member.Node != nil {
+			return true
+		}
+		return false
+	}
+	return false
+}
+
 // String returns the string representation of the CompletedRule.
 func (r *CompletedRule) String() string {
 	var addressString string

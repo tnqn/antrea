@@ -105,6 +105,9 @@ type Controller struct {
 	// reconciler provides interfaces to reconcile the desired state of
 	// NetworkPolicy rules with the actual state of Openflow entries.
 	reconciler Reconciler
+
+	podRuleReconciler  Reconciler
+	nodeRuleReconciler Reconciler
 	// l7RuleReconciler provides interfaces to reconcile the desired state of
 	// NetworkPolicy rules which have L7 rules with the actual state of Suricata rules.
 	l7RuleReconciler L7RuleReconciler
@@ -656,7 +659,13 @@ func (c *Controller) syncRule(key string) error {
 		}
 	}
 
-	err := c.reconciler.Reconcile(rule)
+	var err error
+	if rule.AppliedToNode() {
+		err = c.nodeRuleReconciler.Reconcile(rule)
+	} else {
+		err = c.podRuleReconciler.Reconcile(rule)
+	}
+
 	if c.fqdnController != nil {
 		// No matter whether the rule reconciliation succeeds or not, fqdnController
 		// needs to be notified of the status.
