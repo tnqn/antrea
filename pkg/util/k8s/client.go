@@ -40,6 +40,93 @@ const (
 	kubeServicePortEnvKey = "KUBERNETES_SERVICE_PORT"
 )
 
+type Interface interface {
+	K8s() clientset.Interface
+	Aggregator() aggregatorclientset.Interface
+	CRD() crdclientset.Interface
+	APIExtension() apiextensionclientset.Interface
+	Multicluster() mcclientset.Interface
+	NetworkPolicy() policyclient.Interface
+}
+
+type Clientsets struct {
+	k8s           clientset.Interface
+	aggregator    aggregatorclientset.Interface
+	crd           crdclientset.Interface
+	apiExtension  apiextensionclientset.Interface
+	multicluster  mcclientset.Interface
+	networkPolicy policyclient.Interface
+}
+
+func New(config componentbaseconfig.ClientConnectionConfiguration, kubeAPIServerOverride string) (*Clientsets, error) {
+	kubeConfig, err := CreateRestConfig(config, kubeAPIServerOverride)
+	if err != nil {
+		return nil, err
+	}
+
+	client, err := clientset.NewForConfig(kubeConfig)
+	if err != nil {
+		return nil, err
+	}
+
+	aggregatorClient, err := aggregatorclientset.NewForConfig(kubeConfig)
+	if err != nil {
+		return nil, err
+	}
+	// Create client for CRD operations.
+	crdClient, err := crdclientset.NewForConfig(kubeConfig)
+	if err != nil {
+		return nil, err
+	}
+	// Create client for CRD manipulations.
+	apiExtensionClient, err := apiextensionclientset.NewForConfig(kubeConfig)
+	if err != nil {
+		return nil, err
+	}
+
+	// Create client for multicluster CRD operations.
+	mcClient, err := mcclientset.NewForConfig(kubeConfig)
+	if err != nil {
+		return nil, err
+	}
+	policyClient, err := policyclient.NewForConfig(kubeConfig)
+	if err != nil {
+		return nil, err
+	}
+	return &Clientsets{
+		k8s:           client,
+		aggregator:    aggregatorClient,
+		crd:           crdClient,
+		apiExtension:  apiExtensionClient,
+		multicluster:  mcClient,
+		networkPolicy: policyClient,
+	}, nil
+}
+
+func (c *Clientsets) K8s() clientset.Interface {
+	return c.k8s
+}
+
+func (c *Clientsets) Aggregator() aggregatorclientset.Interface {
+	return c.aggregator
+}
+
+func (c *Clientsets) CRD() crdclientset.Interface {
+	return c.crd
+}
+
+func (c *Clientsets) APIExtension() apiextensionclientset.Interface {
+	return c.apiExtension
+}
+
+func (c *Clientsets) Multicluster() mcclientset.Interface {
+	return c.multicluster
+}
+
+func (c *Clientsets) NetworkPolicy() policyclient.Interface {
+	return c.networkPolicy
+}
+
 // CreateClients creates kube clients from the given config.
 func CreateClients(config componentbaseconfig.ClientConnectionConfiguration, kubeAPIServerOverride string) (
 	clientset.Interface, aggregatorclientset.Interface, crdclientset.Interface, apiextensionclientset.Interface, mcclientset.Interface, policyclient.Interface, error) {

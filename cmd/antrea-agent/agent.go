@@ -101,10 +101,13 @@ func run(o *Options) error {
 	klog.InfoS("Starting Antrea agent", "version", version.GetFullVersion())
 
 	// Create K8s Clientset, CRD Clientset, Multicluster CRD Clientset and SharedInformerFactory for the given config.
-	k8sClient, _, crdClient, _, mcClient, _, err := k8s.CreateClients(o.config.ClientConnection, o.config.KubeAPIServerOverride)
+	clientsets, err := k8s.New(o.config.ClientConnection, o.config.KubeAPIServerOverride)
 	if err != nil {
 		return fmt.Errorf("error creating K8s clients: %v", err)
 	}
+	k8sClient := clientsets.K8s()
+	crdClient := clientsets.CRD()
+	mcClient := clientsets.Multicluster()
 	k8s.OverrideKubeAPIServer(o.config.KubeAPIServerOverride)
 
 	informerFactory := informers.NewSharedInformerFactory(k8sClient, informerDefaultResync)
