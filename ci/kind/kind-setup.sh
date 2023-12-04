@@ -30,12 +30,15 @@ IP_FAMILY="ipv4"
 NUM_WORKERS=2
 SUBNETS=""
 EXTRA_NETWORKS=""
+VLAN_SUBNETS=""
+VLAN_ID=""
 ENCAP_MODE=""
 PROXY=true
 KUBE_PROXY_MODE="iptables"
 PROMETHEUS=false
 K8S_VERSION=""
 KUBE_NODE_IPAM=true
+DEPLOY_EXTERNAL_SERVER=false
 positional_args=()
 options=()
 
@@ -66,11 +69,17 @@ where:
   --subnets: a subnet creates a separate Docker bridge network (named 'antrea-<idx>') with the assigned subnet. A worker
     Node will be connected to one of those network. Default is empty: all worker Nodes connected to the default Docker
     bridge network created by kind.
+  --vlan-subnets: specifies the subnets of the VLAN to which all Nodes will be connected, in addition to the primary network.
+    The IP expression of the subnet will be used as the gateway IP. For example, '--vlan-subnets 10.100.100.1/24' means
+    10.100.100.1/24 will be assigned to the VLAN sub-interface of the network.
+  --vlan-id: specifies the ID of the VLAN to which all Nodes will be connected, in addition to the primary network. Note,
+    '--vlan-subnets' and '--vlan-id' must be specified together.
   --extra-networks: an extra network creates a separate Docker bridge network (named 'antrea-<idx>') with the assigned
     subnet. All worker Nodes will be connected to all the extra networks, in addition to the default Docker bridge
     network. Note, '--extra-networks' and '--subnets' cannot be specified together.
   --ip-family: specifies the ip-family for the kind cluster, default is $IP_FAMILY.
   --k8s-version: specifies the Kubernetes version of the kind cluster, kind's default K8s version will be used if empty.
+  --deploy-external-server: deploy a container running as an external server for the cluster.
   --all: delete all kind clusters
   --until: delete kind clusters that have been created before the specified duration.
 "
@@ -229,6 +238,44 @@ function configure_extra_networks {
   done
 }
 
+function configure_vlan_subnets {
+  if [[ -z $VLAN_SUBNETS || -z $VLAN_ID ]]; then
+    return
+  fi
+  echo "Configuring VLAN subnets"
+
+  bridge_id=$(docker network inspect kind -f {{.ID}})
+  bridge_interface="br-${bridge_id:0:12}"
+  vlan_interface="br-${bridge_id:0:7}.$VLAN_ID"
+
+  ip link add link $bridge_interface name $vlan_interface type vlan id $VLAN_ID
+  ip link set $vlan_interface up
+  for s in $VLAN_SUBNETS ; do
+    echo "configuring extra IP $s to vlan interface $vlan_interface"
+    ip addr add dev $vlan_interface $s
+  done
+  iptables -t filter -A FORWARD -i $bridge_interface -o $vlan_interface -j ACCEPT
+  iptables -t filter -A FORWARD -o $bridge_interface -i $vlan_interface -j ACCEPT
+}
+
+function delete_vlan_subnets {
+  echo "Deleting VLAN subnets"
+
+  bridge_id=$(docker network inspect kind -f {{.ID}})
+  bridge_interface="br-${bridge_id:0:12}"
+  vlan_interface_prefix="br-${bridge_id:0:7}."
+
+  found_vlan_interfaces=$(ip -br link show type vlan | cut -d " " -f 1)
+  for interface in $found_vlan_interfaces ; do
+    if [[ $interface =~ ${vlan_interface_prefix}[0-9]+@${bridge_interface} ]]; then
+      interface_name=${interface%@*}
+      ip link del $interface_name
+      iptables -t filter -D FORWARD -i $bridge_interface -o $interface_name -j ACCEPT || true
+      iptables -t filter -D FORWARD -o $bridge_interface -i $interface_name -j ACCEPT || true
+    fi
+  done
+}
+
 function delete_networks {
   networks=$(docker network ls -f name=antrea --format '{{.Name}}')
   networks="$(echo $networks)"
@@ -355,6 +402,8 @@ EOF
 
   configure_networks
   configure_extra_networks
+  configure_vlan_subnets
+  setup_external_server
   load_images
 
   if [[ $ANTREA_CNI == true ]]; then
@@ -385,6 +434,8 @@ function destroy {
       kind delete cluster --name $CLUSTER_NAME
   fi
   delete_networks
+  delete_vlan_subnets
+  destroy_external_server
 }
 
 function printUnixTimestamp {
@@ -394,6 +445,17 @@ function printUnixTimestamp {
     else
         echo $(date -d "$1" '+%s')
     fi
+}
+
+function setup_external_server {
+  if [[ $DEPLOY_EXTERNAL_SERVER == true ]]; then
+    docker run -d --name external-server --network kind -it --rm registry.k8s.io/e2e-test-images/agnhost:2.29 netexec &> /dev/null
+  fi
+}
+
+function destroy_external_server {
+  echo "Deleting external server"
+  docker rm -f external-server &> /dev/null || true
 }
 
 function clean_kind {
@@ -482,6 +544,16 @@ while [[ $# -gt 0 ]]
       EXTRA_NETWORKS="$2"
       shift 2
       ;;
+    --vlan-subnets)
+      add_option "--vlan-subnets" "create"
+      VLAN_SUBNETS="$2"
+      shift 2
+      ;;
+    --vlan-id)
+      add_option "--vlan-id" "create"
+      VLAN_ID="$2"
+      shift 2
+      ;;
     --images)
       add_option "--image" "create"
       IMAGES="$2"
@@ -501,6 +573,11 @@ while [[ $# -gt 0 ]]
       add_option "--k8s-version" "create"
       K8S_VERSION="$2"
       shift 2
+      ;;
+    --deploy-external-server)
+      add_option "--deploy-external-server" "create"
+      DEPLOY_EXTERNAL_SERVER=true
+      shift
       ;;
     --all)
       add_option "--all" "destroy"

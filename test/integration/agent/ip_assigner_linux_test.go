@@ -25,6 +25,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/sets"
 
 	"antrea.io/antrea/pkg/agent/ipassigner"
+	crdv1b1 "antrea.io/antrea/pkg/apis/crd/v1beta1"
 )
 
 const dummyDeviceName = "antrea-dummy0"
@@ -40,16 +41,16 @@ func TestIPAssigner(t *testing.T) {
 	require.NoError(t, err, "Failed to find the dummy device")
 	defer netlink.LinkDel(dummyDevice)
 
-	err = ipAssigner.AssignIP("x", false)
+	err = ipAssigner.AssignIP("x", nil, false)
 	assert.Error(t, err, "Assigning an invalid IP should fail")
 
 	ip1 := "10.10.10.10"
 	ip2 := "10.10.10.11"
 	ip3 := "2021:124:6020:1006:250:56ff:fea7:36c2"
-	desiredIPs := sets.New[string](ip1, ip2, ip3)
+	desiredIPs := map[string]*crdv1b1.SubnetInfo{ip1: nil, ip2: nil, ip3: nil}
 
 	for ip := range desiredIPs {
-		errAssign := ipAssigner.AssignIP(ip, false)
+		errAssign := ipAssigner.AssignIP(ip, nil, false)
 		cmd := exec.Command("ip", "addr")
 		out, err := cmd.CombinedOutput()
 		if err != nil {
@@ -62,27 +63,27 @@ func TestIPAssigner(t *testing.T) {
 
 	actualIPs, err := listIPAddresses(dummyDevice)
 	require.NoError(t, err, "Failed to list IP addresses")
-	assert.Equal(t, desiredIPs, actualIPs, "Actual IPs don't match")
+	assert.Equal(t, sets.New[string](ip1, ip2, ip3), actualIPs, "Actual IPs don't match")
 
 	newIPAssigner, err := ipassigner.NewIPAssigner(nodeLinkName, dummyDeviceName)
 	require.NoError(t, err, "Initializing new IP assigner failed")
-	assert.Equal(t, sets.New[string](), newIPAssigner.AssignedIPs(), "Assigned IPs don't match")
+	assert.Equal(t, map[string]*crdv1b1.SubnetInfo{}, newIPAssigner.AssignedIPs(), "Assigned IPs don't match")
 
 	ip4 := "2021:124:6020:1006:250:56ff:fea7:36c4"
-	newDesiredIPs := sets.New[string](ip1, ip2, ip4)
+	newDesiredIPs := map[string]*crdv1b1.SubnetInfo{ip1: nil, ip2: nil, ip4: nil}
 	err = newIPAssigner.InitIPs(newDesiredIPs)
 	require.NoError(t, err, "InitIPs failed")
 	assert.Equal(t, newDesiredIPs, newIPAssigner.AssignedIPs(), "Assigned IPs don't match")
 
 	actualIPs, err = listIPAddresses(dummyDevice)
 	require.NoError(t, err, "Failed to list IP addresses")
-	assert.Equal(t, newDesiredIPs, actualIPs, "Actual IPs don't match")
+	assert.Equal(t, sets.New[string](ip1, ip2, ip4), actualIPs, "Actual IPs don't match")
 
 	for ip := range newDesiredIPs {
 		err = newIPAssigner.UnassignIP(ip)
 		assert.NoError(t, err, "Failed to unassign a valid IP")
 	}
-	assert.Equal(t, sets.New[string](), newIPAssigner.AssignedIPs(), "Assigned IPs don't match")
+	assert.Equal(t, map[string]*crdv1b1.SubnetInfo{}, newIPAssigner.AssignedIPs(), "Assigned IPs don't match")
 
 	actualIPs, err = listIPAddresses(dummyDevice)
 	require.NoError(t, err, "Failed to list IP addresses")
