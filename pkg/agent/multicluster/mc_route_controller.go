@@ -129,7 +129,7 @@ func NewMCDefaultRouteController(
 		controller.wireGuardConfig = &config.WireGuardConfig{
 			Port: multiclusterConfig.WireGuard.Port,
 			Name: multiclusterWireGuardInterface,
-			MTU:  controller.nodeConfig.NodeTransportInterfaceMTU,
+			MTU:  networkConfig.InterfaceMTU,
 		}
 	}
 	controller.gwInformer.Informer().AddEventHandlerWithResyncPeriod(
