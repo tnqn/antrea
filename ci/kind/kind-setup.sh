@@ -296,8 +296,13 @@ function load_images {
   for img in $IMAGES; do
     docker image inspect $img > /dev/null 2>&1
     if [[ $? -ne 0 ]]; then
-      echoerr "docker image $img not found"
-      continue
+      echoerr "docker image $img not found, try pulling it"
+      docker pull $img > /dev/null 2>&1
+      if [[ $? -ne 0 ]]; then
+        echoerr "docker image $img failed to pull"
+        continue
+      fi
+      echo "pulled image $img"
     fi
     kind load docker-image $img --name $CLUSTER_NAME > /dev/null 2>&1
     if [[ $? -ne 0 ]]; then

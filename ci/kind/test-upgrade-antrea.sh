@@ -148,18 +148,10 @@ fi
 
 echo "Running upgrade test for tag $FROM_TAG"
 
-DOCKER_IMAGES=("busybox" "projects.registry.vmware.com/antrea/antrea-ubuntu:$FROM_TAG")
-
-for img in "${DOCKER_IMAGES[@]}"; do
-    echo "Pulling $img"
-    for i in `seq 3`; do
-        docker pull $img > /dev/null && break
-        sleep 1
-    done
-done
-
-DOCKER_IMAGES+=("antrea/antrea-agent-ubuntu:latest" \
-                "antrea/antrea-controller-ubuntu:latest")
+DOCKER_IMAGES=("busybox" \
+               "projects.registry.vmware.com/antrea/antrea-ubuntu:$FROM_TAG" \
+               "antrea/antrea-agent-ubuntu:latest" \
+               "antrea/antrea-controller-ubuntu:latest")
 
 echo "Creating Kind cluster"
 IMAGES="${DOCKER_IMAGES[@]}"
