@@ -15,6 +15,7 @@
 package openflow
 
 import (
+	"antrea.io/antrea/pkg/util/ip"
 	"fmt"
 	"net"
 	"sort"
@@ -1055,6 +1056,58 @@ func (c *policyRuleConjunction) getAddressClause(addrType types.AddressType) *cl
 		klog.Errorf("no address clause use AddressType %d", addrType)
 		return nil
 	}
+}
+
+func getRuleType(rule *types.PolicyRule) {
+	for _, service := range rule.Service {
+		if service.Protocol != nil && *service.Protocol == v1beta2.ProtocolIGMP {
+			return igmp
+		}
+	}
+
+	for _, ipBlock := range rule.To.IPBlocks {
+		ipAddr := ip.IPNetToNetIPNet(&ipBlock.CIDR)
+		if ipAddr.IP.IsMulticast() {
+			return multicast
+		}
+	}
+}
+
+// getOFRuleTable retrieves the OpenFlow table to install the CompletedRule.
+// The decision is made based on whether the rule is created for an ACNP/ANNP, and
+// the Tier of that NetworkPolicy.
+func getOFRuleTable(rule *types.PolicyRule) uint8 {
+	var ruleTables []*openflow.Table
+	var tableID uint8
+	switch rule.Transmission {
+	case types.Unicast:
+		if !rule.IsAntreaNetworkPolicyRule() {
+			if rule.Direction == v1beta2.DirectionIn {
+				return IngressRuleTable.GetID()
+			}
+			return EgressRuleTable.GetID()
+		}
+		if rule.Direction == v1beta2.DirectionIn {
+			ruleTables = GetAntreaPolicyIngressTables()
+		} else {
+			ruleTables = GetAntreaPolicyEgressTables()
+		}
+		if *rule.TierPriority != baselineTierPriority && *rule.TierPriority != banpTierPriority {
+			return ruleTables[0].GetID()
+		}
+		tableID = ruleTables[1].GetID()
+	case igmp:
+		if rule.Direction == v1beta2.DirectionIn {
+			tableID = MulticastIngressRuleTable.GetID()
+		}
+	case types.Multicast:
+		// Multicast NetworkPolicy only supports egress so far, we leave tableID as 0
+		// for ingress rules for multicast, later we will return empty flows for it.
+		if rule.Direction == v1beta2.DirectionOut {
+			tableID = MulticastEgressRuleTable.GetID()
+		}
+	}
+	return tableID
 }
 
 // calculateActionFlowChangesForRule calculates and updates the actionFlows for the conjunction corresponded to the ofPolicyRule.

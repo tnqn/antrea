@@ -88,8 +88,16 @@ type NodePolicyRule struct {
 	IsIPv6          bool
 }
 
+type TransmissionMode string
+
+const (
+	Unicast   TransmissionMode = "unicast"
+	Multicast TransmissionMode = "multicast"
+)
+
 // PolicyRule groups configurations to set up conjunctive match for egress/ingress policy rules.
 type PolicyRule struct {
+	Transmission  TransmissionMode
 	Direction     v1beta2.Direction
 	From          []Address
 	To            []Address
