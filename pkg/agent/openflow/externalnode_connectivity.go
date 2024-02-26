@@ -204,30 +204,13 @@ func (f *featureExternalNodeConnectivity) addPolicyBypassFlows(flow binding.Flow
 	return nil
 }
 
-func (c *client) InstallVMUplinkFlows(hostIFName string, hostPort int32, uplinkPort int32) error {
-	flows := c.featureExternalNodeConnectivity.vmUplinkFlows(uint32(hostPort), uint32(uplinkPort))
-	return c.addFlows(c.featureExternalNodeConnectivity.uplinkFlowCache, hostIFName, flows)
-}
-
-func (c *client) UninstallVMUplinkFlows(hostIFName string) error {
-	return c.deleteFlows(c.featureExternalNodeConnectivity.uplinkFlowCache, hostIFName)
-}
-
-func (c *client) InstallPolicyBypassFlows(protocol binding.Protocol, ipNet *net.IPNet, port uint16, isIngress bool) error {
-	flow := c.featureExternalNodeConnectivity.policyBypassFlow(protocol, ipNet, port, isIngress)
-	flowMessages := GetFlowModMessages([]binding.Flow{flow}, binding.AddMessage)
-	if err := c.ofEntryOperations.AddAll(flowMessages); err != nil {
-		return err
+func (f *featureExternalNodeConnectivity) getRequiredTables() []*Table {
+	return []*Table{
+		ConntrackTable,
+		ConntrackStateTable,
+		L2ForwardingCalcTable,
+		ConntrackCommitTable,
+		OutputTable,
+		NonIPTable,
 	}
-	return c.featureExternalNodeConnectivity.addPolicyBypassFlows(flow)
-}
-
-// nonIPPipelineClassifyFlow generates a flow in PipelineClassifierTable to resubmit packets not using IP protocols to
-// pipelineNonIP.
-func nonIPPipelineClassifyFlow(cookieID uint64, pipeline binding.Pipeline) binding.Flow {
-	targetTable := pipeline.GetFirstTable()
-	return PipelineRootClassifierTable.ofTable.BuildFlow(priorityLow).
-		Cookie(cookieID).
-		Action().GotoTable(targetTable.GetID()).
-		Done()
 }

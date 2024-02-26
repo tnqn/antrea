@@ -17,6 +17,7 @@ package openflow
 import (
 	"fmt"
 	"net"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -92,6 +93,19 @@ var (
 type TCPFlags struct {
 	Flag uint16
 	Mask uint16
+}
+
+// policyConjKeyFunc knows how to get key of a *policyRuleConjunction.
+func policyConjKeyFunc(obj interface{}) (string, error) {
+	conj := obj.(*policyRuleConjunction)
+	return fmt.Sprint(conj.id), nil
+}
+
+// priorityIndexFunc knows how to get priority of actionFlows in a *policyRuleConjunction.
+// It's provided to cache.Indexer to build an index of policyRuleConjunction.
+func priorityIndexFunc(obj interface{}) ([]string, error) {
+	conj := obj.(*policyRuleConjunction)
+	return conj.ActionFlowPriorities(), nil
 }
 
 // IP address calculated from Pod's address.
@@ -694,100 +708,6 @@ type clause struct {
 	dropTable binding.Table
 }
 
-func (c *client) NewDNSPacketInConjunction(id uint32) error {
-	existingConj := c.featureNetworkPolicy.getPolicyRuleConjunction(id)
-	if existingConj != nil {
-		klog.InfoS("DNS Conjunction has already been added to cache", "id", id)
-		return nil
-	}
-	conj := &policyRuleConjunction{
-		id:          id,
-		ruleTableID: AntreaPolicyIngressRuleTable.ofTable.GetID(),
-		actionFlows: GetFlowModMessages([]binding.Flow{c.featureNetworkPolicy.dnsPacketInFlow(id)}, binding.AddMessage),
-	}
-	if err := c.ofEntryOperations.AddAll(conj.actionFlows); err != nil {
-		return fmt.Errorf("error when adding action flows for the DNS conjunction: %w", err)
-	}
-
-	dnsPriority := priorityDNSIntercept
-	dnsCTState := &openflow15.CTStates{
-		// Use ct_state=+trk+rpl as matching condition.
-		// CTState bit-state map:
-		// dnat | snat | trk | inv | rpl | rel | est | new
-		Data: 0b00101000,
-		Mask: 0b00101000,
-	}
-	dnsPortMatchValue := types.BitRange{Value: uint16(dnsPort)}
-
-	conj.serviceClause = conj.newClause(1, 2, getTableByID(conj.ruleTableID), nil)
-	conj.toClause = conj.newClause(2, 2, getTableByID(conj.ruleTableID), nil)
-	c.featureNetworkPolicy.conjMatchFlowLock.Lock()
-	defer c.featureNetworkPolicy.conjMatchFlowLock.Unlock()
-	var ctxChanges []*conjMatchFlowContextChange
-	for _, proto := range c.featureNetworkPolicy.ipProtocols {
-		tcpMatch := &conjunctiveMatch{
-			tableID:  conj.serviceClause.ruleTable.GetID(),
-			priority: &dnsPriority,
-			matchPairs: []matchPair{
-				{
-					matchKey:   MatchCTState,
-					matchValue: dnsCTState,
-				},
-			},
-		}
-		udpMatch := &conjunctiveMatch{
-			tableID:  conj.serviceClause.ruleTable.GetID(),
-			priority: &dnsPriority,
-			matchPairs: []matchPair{
-				// Add CTState for UDP as well to make sure only solicited DNS responses are sent
-				// to userspace.
-				{
-					matchKey:   MatchCTState,
-					matchValue: dnsCTState,
-				},
-			},
-		}
-		if proto == binding.ProtocolIP {
-			tcpMatch.matchPairs = append(tcpMatch.matchPairs, matchPair{
-				matchKey:   MatchTCPSrcPort,
-				matchValue: dnsPortMatchValue,
-			})
-			udpMatch.matchPairs = append(udpMatch.matchPairs, matchPair{
-				matchKey:   MatchUDPSrcPort,
-				matchValue: dnsPortMatchValue,
-			})
-		} else if proto == binding.ProtocolIPv6 {
-			tcpMatch.matchPairs = append(tcpMatch.matchPairs, matchPair{
-				matchKey:   MatchTCPv6SrcPort,
-				matchValue: dnsPortMatchValue,
-			})
-			udpMatch.matchPairs = append(udpMatch.matchPairs, matchPair{
-				matchKey:   MatchUDPv6SrcPort,
-				matchValue: dnsPortMatchValue,
-			})
-		}
-		tcpCtxChange := conj.serviceClause.addConjunctiveMatchFlow(c.featureNetworkPolicy, tcpMatch, false, false)
-		udpCtxChange := conj.serviceClause.addConjunctiveMatchFlow(c.featureNetworkPolicy, udpMatch, false, false)
-		ctxChanges = append(ctxChanges, tcpCtxChange, udpCtxChange)
-	}
-	if err := c.featureNetworkPolicy.applyConjunctiveMatchFlows(ctxChanges); err != nil {
-		return err
-	}
-	// Add the policyRuleConjunction into policyCache
-	c.featureNetworkPolicy.policyCache.Add(conj)
-	return nil
-}
-
-func (c *client) AddAddressToDNSConjunction(id uint32, addrs []types.Address) error {
-	dnsPriority := priorityDNSIntercept
-	return c.AddPolicyRuleAddress(id, types.DstAddress, addrs, &dnsPriority, false, false)
-}
-
-func (c *client) DeleteAddressFromDNSConjunction(id uint32, addrs []types.Address) error {
-	dnsPriority := priorityDNSIntercept
-	return c.DeletePolicyRuleAddress(id, types.DstAddress, addrs, &dnsPriority)
-}
-
 func (c *clause) addConjunctiveMatchFlow(featureNetworkPolicy *featureNetworkPolicy, match *conjunctiveMatch, enableLogging, isMCNPRule bool) *conjMatchFlowContextChange {
 	matcherKey := match.generateGlobalMapKey()
 	_, found := c.matches[matcherKey]
@@ -1137,51 +1057,6 @@ func (c *policyRuleConjunction) getAddressClause(addrType types.AddressType) *cl
 	}
 }
 
-// InstallPolicyRuleFlows installs flows for a new NetworkPolicy rule. Rule should include all fields in the
-// NetworkPolicy rule. Each ingress/egress policy rule installs Openflow entries on two tables, one for ruleTable and
-// the other for dropTable. If a packet does not pass the ruleTable, it will be dropped by the dropTable.
-// NetworkPolicyController will make sure only one goroutine operates on a PolicyRule and addresses in the rule.
-// For a normal NetworkPolicy rule, these Openflow entries are installed: 1) 1 conjunction action flow; 2) multiple
-// conjunctive match flows, the flow number depends on addresses in rule.From and rule.To, or if
-// rule.FromExcepts/rule.ToExcepts are present, flow number is equal to diff of addresses between rule.From and
-// rule.FromExcepts, and diff addresses between rule.To and rule.ToExcepts, and in addition number includes service ports
-// in rule.Service; and 3) multiple default drop flows, the number is dependent on the addresses in rule.From for
-// an egress rule, and addresses in rule.To for an ingress rule.
-// For ALLOW-ALL rule, the Openflow entries installed on the switch are similar to a normal rule. The differences include,
-// 1) rule.Service is nil; and 2) rule.To has only one address "0.0.0.0/0" for egress rule, and rule.From is "0.0.0.0/0"
-// for ingress rule.
-// For DENY-ALL rule, only the default drop flow is installed for the addresses in rule.From for egress rule, or
-// addresses in rule.To for ingress rule. No conjunctive match flow or conjunction action except flows are installed.
-// A DENY-ALL rule is configured with rule.ID, rule.Direction, and either rule.From(egress rule) or rule.To(ingress rule).
-// Other fields in the rule should be nil.
-// If there is an error in any clause's addAddrFlows or addServiceFlows, the conjunction action flow will never be hit.
-// If the default drop flow is already installed before this error, all packets will be dropped by the default drop flow,
-// Otherwise all packets will be allowed.
-func (c *client) InstallPolicyRuleFlows(rule *types.PolicyRule) error {
-	c.replayMutex.RLock()
-	defer c.replayMutex.RUnlock()
-
-	conj := c.featureNetworkPolicy.calculateActionFlowChangesForRule(rule)
-
-	c.featureNetworkPolicy.conjMatchFlowLock.Lock()
-	defer c.featureNetworkPolicy.conjMatchFlowLock.Unlock()
-	ctxChanges := c.featureNetworkPolicy.calculateMatchFlowChangesForRule(conj, rule)
-
-	var flowMessages []*openflow15.FlowMod
-	for _, fm := range append(conj.metricFlows, conj.actionFlows...) {
-		flowMessages = append(flowMessages, fm)
-	}
-	if err := c.ofEntryOperations.AddAll(flowMessages); err != nil {
-		return err
-	}
-	if err := c.featureNetworkPolicy.applyConjunctiveMatchFlows(ctxChanges); err != nil {
-		return err
-	}
-	// Add the policyRuleConjunction into policyCache
-	c.featureNetworkPolicy.policyCache.Add(conj)
-	return nil
-}
-
 // calculateActionFlowChangesForRule calculates and updates the actionFlows for the conjunction corresponded to the ofPolicyRule.
 func (f *featureNetworkPolicy) calculateActionFlowChangesForRule(rule *types.PolicyRule) *policyRuleConjunction {
 	ruleOfID := rule.FlowID
@@ -1301,58 +1176,6 @@ func (f *featureNetworkPolicy) addActionToConjunctiveMatch(clause *clause, match
 		// Add the conjunction ID to the conjunctiveFlowContext's denyAllRules.
 		context.addDenyAllRule(clause.action.conjID)
 	}
-}
-
-// BatchInstallPolicyRuleFlows installs flows for NetworkPolicy rules in case of agent restart. It calculates and
-// accumulates all Openflow entry updates required and installs all of them on OVS bridge in one bundle.
-// It resets the global conjunctive match flow cache upon failure, and should NOT be used after any rule is installed
-// via the InstallPolicyRuleFlows method. Otherwise the cache would be out of sync.
-func (c *client) BatchInstallPolicyRuleFlows(ofPolicyRules []*types.PolicyRule) error {
-	c.replayMutex.RLock()
-	defer c.replayMutex.RUnlock()
-
-	var allFlowMessages []*openflow15.FlowMod
-	var conjunctions []*policyRuleConjunction
-
-	for _, rule := range ofPolicyRules {
-		conj := c.featureNetworkPolicy.calculateActionFlowChangesForRule(rule)
-		c.featureNetworkPolicy.addRuleToConjunctiveMatch(conj, rule)
-		for _, msg := range append(conj.actionFlows, conj.metricFlows...) {
-			allFlowMessages = append(allFlowMessages, msg)
-		}
-		conjunctions = append(conjunctions, conj)
-	}
-
-	for _, ctx := range c.featureNetworkPolicy.globalConjMatchFlowCache {
-		// In theory there must be at least one action but InstallPolicyRuleFlows currently handles the 1 clause case
-		// and we do the same in addRuleToConjunctiveMatch. The check is added only for consistency. Later we should
-		// return error if clients install a rule with only 1 clause, and should remove the extra code for processing it.
-		if len(ctx.actions) > 0 {
-			actions := make([]*conjunctiveAction, 0, len(ctx.actions))
-			for _, action := range ctx.actions {
-				actions = append(actions, action)
-			}
-			ctx.flow = getFlowModMessage(c.featureNetworkPolicy.conjunctiveMatchFlow(ctx.tableID, ctx.matchPairs, ctx.priority, actions), binding.AddMessage)
-			allFlowMessages = append(allFlowMessages, ctx.flow)
-		}
-		if ctx.dropFlow != nil {
-			allFlowMessages = append(allFlowMessages, ctx.dropFlow)
-		}
-	}
-
-	// Send the changed Openflow entries to the OVS bridge.
-	if err := c.ofEntryOperations.AddAll(allFlowMessages); err != nil {
-		// Reset the global conjunctive match flow cache since the OpenFlow bundle, which contains
-		// all the match flows to be installed, was not applied successfully.
-		c.featureNetworkPolicy.globalConjMatchFlowCache = map[string]*conjMatchFlowContext{}
-		return err
-	}
-	// Update conjMatchFlowContexts as the expected status.
-	for _, conj := range conjunctions {
-		// Add the policyRuleConjunction into policyCache
-		c.featureNetworkPolicy.policyCache.Add(conj)
-	}
-	return nil
 }
 
 // applyConjunctiveMatchFlows installs OpenFlow entries on the OVS bridge, and then updates the conjMatchFlowContext.
@@ -1553,48 +1376,6 @@ func (f *featureNetworkPolicy) getPolicyRuleConjunction(ruleID uint32) *policyRu
 	return conj.(*policyRuleConjunction)
 }
 
-func (c *client) GetPolicyInfoFromConjunction(ruleID uint32) (bool, *v1beta2.NetworkPolicyReference, string, string, string) {
-	conjunction := c.featureNetworkPolicy.getPolicyRuleConjunction(ruleID)
-	if conjunction == nil || conjunction.npRef == nil {
-		return false, nil, "", "", ""
-	}
-	priorities := conjunction.ActionFlowPriorities()
-	if len(priorities) == 0 {
-		return false, nil, "", "", ""
-	}
-	return true, conjunction.npRef, priorities[0], conjunction.ruleName, conjunction.ruleLogLabel
-}
-
-// UninstallPolicyRuleFlows removes the Openflow entry relevant to the specified NetworkPolicy rule.
-// It also returns a slice of stale ofPriorities used by ClusterNetworkPolicies.
-// UninstallPolicyRuleFlows will do nothing if no Openflow entry for the rule is installed.
-func (c *client) UninstallPolicyRuleFlows(ruleID uint32) ([]string, error) {
-	c.replayMutex.RLock()
-	defer c.replayMutex.RUnlock()
-
-	conj := c.featureNetworkPolicy.getPolicyRuleConjunction(ruleID)
-	if conj == nil {
-		klog.V(2).Infof("policyRuleConjunction with ID %d not found", ruleID)
-		return nil, nil
-	}
-	staleOFPriorities := c.featureNetworkPolicy.getStalePriorities(conj)
-	// Delete action flows from the OVS bridge.
-	if err := c.ofEntryOperations.DeleteAll(append(conj.actionFlows, conj.metricFlows...)); err != nil {
-		return nil, err
-	}
-	c.featureNetworkPolicy.conjMatchFlowLock.Lock()
-	defer c.featureNetworkPolicy.conjMatchFlowLock.Unlock()
-	// Get the conjMatchFlowContext changes.
-	ctxChanges := conj.calculateChangesForRuleDeletion()
-	// Send the changed OpenFlow entries to the OVS bridge and update the conjMatchFlowContext.
-	if err := c.featureNetworkPolicy.applyConjunctiveMatchFlows(ctxChanges); err != nil {
-		return nil, err
-	}
-
-	c.featureNetworkPolicy.policyCache.Delete(conj)
-	return staleOFPriorities, nil
-}
-
 // getStalePriorities returns the ofPriorities that will be stale on the rule table where the
 // policyRuleConjunction is installed, after the deletion of that policyRuleConjunction.
 func (f *featureNetworkPolicy) getStalePriorities(conj *policyRuleConjunction) (staleOFPriorities []string) {
@@ -1655,85 +1436,6 @@ func (f *featureNetworkPolicy) replayFlows() []*openflow15.FlowMod {
 		addMatchFlows(ctx)
 	}
 	return flows
-}
-
-// AddPolicyRuleAddress adds one or multiple addresses to the specified NetworkPolicy rule. If addrType is srcAddress, the
-// addresses are added to PolicyRule.From, else to PolicyRule.To.
-func (c *client) AddPolicyRuleAddress(ruleID uint32, addrType types.AddressType, addresses []types.Address, priority *uint16, enableLogging, isMCNPRule bool) error {
-	c.replayMutex.RLock()
-	defer c.replayMutex.RUnlock()
-
-	conj := c.featureNetworkPolicy.getPolicyRuleConjunction(ruleID)
-	// If policyRuleConjunction doesn't exist in client's policyCache return not found error. It should not happen, since
-	// NetworkPolicyController will guarantee the policyRuleConjunction is created before this method is called. The check
-	// here is for safety.
-	if conj == nil {
-		return newConjunctionNotFound(ruleID)
-	}
-	var clause = conj.getAddressClause(addrType)
-	// Check if the clause is nil or not. The clause is nil if the addrType is an unsupported type.
-	if clause == nil {
-		return fmt.Errorf("no clause is using addrType %d", addrType)
-	}
-
-	c.featureNetworkPolicy.conjMatchFlowLock.Lock()
-	defer c.featureNetworkPolicy.conjMatchFlowLock.Unlock()
-	flowChanges := clause.addAddrFlows(c.featureNetworkPolicy, addrType, addresses, priority, enableLogging, isMCNPRule)
-	return c.featureNetworkPolicy.applyConjunctiveMatchFlows(flowChanges)
-}
-
-// DeletePolicyRuleAddress removes addresses from the specified NetworkPolicy rule. If addrType is srcAddress, the addresses
-// are removed from PolicyRule.From, else from PolicyRule.To.
-func (c *client) DeletePolicyRuleAddress(ruleID uint32, addrType types.AddressType, addresses []types.Address, priority *uint16) error {
-	c.replayMutex.RLock()
-	defer c.replayMutex.RUnlock()
-
-	conj := c.featureNetworkPolicy.getPolicyRuleConjunction(ruleID)
-	// If policyRuleConjunction doesn't exist in client's policyCache return not found error. It should not happen, since
-	// NetworkPolicyController will guarantee the policyRuleConjunction is created before this method is called. The check
-	//	here is for safety.
-	if conj == nil {
-		return newConjunctionNotFound(ruleID)
-	}
-
-	var clause = conj.getAddressClause(addrType)
-	// Check if the clause is nil or not. The clause is nil if the addrType is an unsupported type.
-	if clause == nil {
-		return fmt.Errorf("no clause is using addrType %d", addrType)
-	}
-
-	c.featureNetworkPolicy.conjMatchFlowLock.Lock()
-	defer c.featureNetworkPolicy.conjMatchFlowLock.Unlock()
-	// Remove policyRuleConjunction to actions of conjunctive match using specific address.
-	changes := clause.deleteAddrFlows(addrType, addresses, priority)
-	// Update the Openflow entries on the OVS bridge, and update local cache.
-	return c.featureNetworkPolicy.applyConjunctiveMatchFlows(changes)
-}
-
-func (c *client) GetNetworkPolicyFlowKeys(npName, npNamespace string) []string {
-	flowKeys := []string{}
-	// Hold replayMutex write lock to protect flows from being modified by
-	// NetworkPolicy updates and replayFlows. This is more for logic
-	// cleanliness, as: for now flow updates do not impact the matching string
-	// generation; NetworkPolicy updates do not change policyRuleConjunction.actionFlows;
-	// and last for protection of clause flows, conjMatchFlowLock is good enough.
-	c.replayMutex.Lock()
-	defer c.replayMutex.Unlock()
-
-	for _, conjObj := range c.featureNetworkPolicy.policyCache.List() {
-		conj := conjObj.(*policyRuleConjunction)
-		// If the NetworkPolicyReference in the policyRuleConjunction is nil then that entry in client's
-		// policyCache should be ignored because here we need to dump flows of NetworkPolicy.
-		if conj.npRef == nil {
-			continue
-		}
-		if conj.npRef.Name == npName && conj.npRef.Namespace == npNamespace {
-			// There can be duplicated flows added due to conjunctive matches
-			// shared by multiple policy rules (clauses).
-			flowKeys = append(flowKeys, conj.getAllFlowKeys()...)
-		}
-	}
-	return flowKeys
 }
 
 // flowUpdates stores updates to the actionFlows and matchFlows in a policyRuleConjunction.
@@ -1869,26 +1571,6 @@ func (f *featureNetworkPolicy) calculateFlowUpdates(updates map[uint16]uint16, t
 	return addFlows, delFlows, conjFlowUpdates
 }
 
-// ReassignFlowPriorities takes a list of priority updates, and update the actionFlows to replace
-// the old priority with the desired one, for each priority update.
-func (c *client) ReassignFlowPriorities(updates map[uint16]uint16, table uint8) error {
-	addFlows, delFlows, conjFlowUpdates := c.featureNetworkPolicy.calculateFlowUpdates(updates, table)
-	add, update, del := c.featureNetworkPolicy.processFlowUpdates(addFlows, delFlows)
-	// Commit the flows updates calculated.
-	err := c.bridge.AddFlowsInBundle(add, update, del)
-	if err != nil {
-		return err
-	}
-	for conjID, actionUpdates := range conjFlowUpdates {
-		originalConj, _, _ := c.featureNetworkPolicy.policyCache.GetByKey(fmt.Sprint(conjID))
-		conj := originalConj.(*policyRuleConjunction)
-		updatedConj := c.featureNetworkPolicy.updateConjunctionActionFlows(conj, actionUpdates)
-		c.featureNetworkPolicy.updateConjunctionMatchFlows(updatedConj, actionUpdates.newPriority)
-		c.featureNetworkPolicy.policyCache.Update(updatedConj)
-	}
-	return nil
-}
-
 func parseMulticastIngressPodFlow(flowMap map[string]string) (uint32, types.RuleMetric) {
 	m := parseFlowMetric(flowMap)
 	reg1 := flowMap["reg1"]
@@ -1978,91 +1660,6 @@ func parseMetricFlow(flowMap map[string]string) (uint32, types.RuleMetric) {
 		return parseDropFlow(flowMap)
 	}
 	return parseAllowFlow(flowMap)
-}
-
-func (c *client) MulticastIngressPodMetrics() map[uint32]*types.RuleMetric {
-	result := map[uint32]*types.RuleMetric{}
-	ingressFlows, _ := c.ovsctlClient.DumpTableFlows(MulticastIngressPodMetricTable.ofTable.GetID())
-	for _, flow := range ingressFlows {
-		if !strings.Contains(flow, metricFlowIdentifier) {
-			continue
-		}
-		flowMap := parseFlowToMap(flow)
-		ofPort, metric := parseMulticastIngressPodFlow(flowMap)
-		result[ofPort] = &metric
-	}
-	return result
-}
-
-func (c *client) MulticastIngressPodMetricsByOFPort(ofPort int32) *types.RuleMetric {
-	table := MulticastIngressPodMetricTable.ofTable.GetID()
-	reg1 := ofPort
-	flow, _ := c.ovsctlClient.DumpMatchedFlow(fmt.Sprintf("table=%d,ip,reg1=%d", table, reg1))
-	if len(flow) == 0 {
-		return &types.RuleMetric{}
-	}
-	flowMap := parseFlowToMap(flow)
-	metric := parseFlowMetric(flowMap)
-	return &metric
-}
-
-func (c *client) MulticastEgressPodMetrics() map[string]*types.RuleMetric {
-	result := map[string]*types.RuleMetric{}
-	ingressFlows, _ := c.ovsctlClient.DumpTableFlows(MulticastEgressPodMetricTable.ofTable.GetID())
-	for _, flow := range ingressFlows {
-		if !strings.Contains(flow, metricFlowIdentifier) {
-			continue
-		}
-		flowMap := parseFlowToMap(flow)
-		srcIP, metric := parseMulticastEgressPodFlow(flowMap)
-		result[srcIP] = &metric
-	}
-	return result
-}
-
-func (c *client) MulticastEgressPodMetricsByIP(ip net.IP) *types.RuleMetric {
-	table := MulticastEgressPodMetricTable.ofTable.GetID()
-	nwSrc := ip.String()
-	flow, _ := c.ovsctlClient.DumpMatchedFlow(fmt.Sprintf("table=%d,ip,nw_src=%s,nw_dst=224.0.0.0/4", table, nwSrc))
-	if len(flow) == 0 {
-		return &types.RuleMetric{}
-	}
-	flowMap := parseFlowToMap(flow)
-	metric := parseFlowMetric(flowMap)
-	return &metric
-}
-
-func (c *client) NetworkPolicyMetrics() map[uint32]*types.RuleMetric {
-	result := map[uint32]*types.RuleMetric{}
-	collectMetricsFromFlows := func(table *Table, getMetricAndID func(flowMap map[string]string) (uint32, types.RuleMetric)) {
-		dumpedFlows, _ := c.ovsctlClient.DumpTableFlows(table.ofTable.GetID())
-		for _, flow := range dumpedFlows {
-			if !strings.Contains(flow, metricFlowIdentifier) {
-				continue
-			}
-			flowMap := parseFlowToMap(flow)
-			ruleID, metric := getMetricAndID(flowMap)
-			if accMetric, ok := result[ruleID]; ok {
-				accMetric.Merge(&metric)
-			} else {
-				result[ruleID] = &metric
-			}
-		}
-	}
-	if c.enableMulticast {
-		// We need to collect NP statistics matching IGMP query messages and egress multicast traffic.
-		collectMetricsFromFlows(MulticastIngressMetricTable, parseMulticastMetricFlow)
-		collectMetricsFromFlows(MulticastEgressMetricTable, parseMulticastMetricFlow)
-	}
-	// We have two flows for each allow rule. One matches 'ct_state=+new'
-	// and counts the number of first packets, which is also the number
-	// of sessions (this is the category why we have 2 flows). The other
-	// matches 'ct_state=-new' and is used to count all subsequent
-	// packets in the session. We need to merge metrics from these 2
-	// flows to get the correct number of total packets.
-	collectMetricsFromFlows(EgressMetricTable, parseMetricFlow)
-	collectMetricsFromFlows(IngressMetricTable, parseMetricFlow)
-	return result
 }
 
 type featureNetworkPolicy struct {
@@ -2269,6 +1866,589 @@ func (f *featureNetworkPolicy) initLoggingFlows() []binding.Flow {
 	return flows
 }
 
+func (f *featureNetworkPolicy) allowRulesMetricFlows(conjunctionID uint32, ingress bool, tableID uint8) []binding.Flow {
+	cookieID := f.cookieAllocator.Request(f.category).Raw()
+	metricTable := IngressMetricTable
+	offset := 0
+	// We use the 0..31 bits of the ct_label to store the ingress rule ID and use the 32..63 bits to store the
+	// egress rule ID.
+	field := IngressRuleCTLabel
+	if !ingress {
+		metricTable = EgressMetricTable
+		offset = 32
+		field = EgressRuleCTLabel
+	}
+	if f.enableMulticast && tableID == MulticastEgressRuleTable.GetID() {
+		metricTable = MulticastEgressMetricTable
+	}
+	if f.enableMulticast && tableID == MulticastIngressRuleTable.GetID() {
+		metricTable = MulticastIngressMetricTable
+	}
+	metricFlow := func(isCTNew bool, protocol binding.Protocol) binding.Flow {
+		return metricTable.ofTable.BuildFlow(priorityNormal).
+			Cookie(cookieID).
+			MatchProtocol(protocol).
+			MatchCTStateNew(isCTNew).
+			MatchCTLabelField(0, uint64(conjunctionID)<<offset, field).
+			Action().NextTable().
+			Done()
+	}
+	var flows []binding.Flow
+	// Unlike rules for unicast traffic, each IGMP and multicast rule uses single metric flow to track stats
+	// in multicast metric tables.
+	if metricTable == MulticastEgressMetricTable || metricTable == MulticastIngressMetricTable {
+		flow := metricTable.ofTable.BuildFlow(priorityNormal).
+			Cookie(f.cookieAllocator.Request(f.category).Raw()).
+			MatchRegFieldWithValue(APConjIDField, conjunctionID).
+			Action().GotoTable(metricTable.GetNext()).
+			Done()
+		flows = append(flows, flow)
+		return flows
+	}
+	// These two flows track the number of sessions in addition to the packet and byte counts.
+	// The flow matching 'ct_state=+new' tracks the number of sessions and byte count of the first packet for each
+	// session.
+	// The flow matching 'ct_state=-new' tracks the byte/packet count of an established connection (both directions).
+	for _, ipProtocol := range f.ipProtocols {
+		flows = append(flows, metricFlow(true, ipProtocol), metricFlow(false, ipProtocol))
+	}
+	return flows
+}
+
+func (f *featureNetworkPolicy) denyRuleMetricFlow(conjunctionID uint32, ingress bool, tableID uint8) binding.Flow {
+	metricTable := IngressMetricTable
+	if !ingress {
+		metricTable = EgressMetricTable
+	}
+	if f.enableMulticast && tableID == MulticastEgressRuleTable.GetID() {
+		metricTable = MulticastEgressMetricTable
+	}
+	if f.enableMulticast && tableID == MulticastIngressRuleTable.GetID() {
+		metricTable = MulticastIngressMetricTable
+	}
+	return metricTable.ofTable.BuildFlow(priorityNormal).
+		Cookie(f.cookieAllocator.Request(f.category).Raw()).
+		MatchRegMark(APDenyRegMark).
+		MatchRegFieldWithValue(APConjIDField, conjunctionID).
+		Action().Drop().
+		Done()
+}
+
+// For normal traffic, conjunctionActionFlow generates the flow to jump to a specific table if policyRuleConjunction ID is matched. Priority of
+// conjunctionActionFlow is created at priorityLow for k8s network policies, and *priority assigned by PriorityAssigner for AntreaPolicy.
+func (f *featureNetworkPolicy) conjunctionActionFlow(conjunctionID uint32, table binding.Table, nextTable uint8, priority *uint16, enableLogging bool, l7RuleVlanID *uint32) []binding.Flow {
+	tableID := table.GetID()
+	cookieID := f.cookieAllocator.Request(f.category).Raw()
+	var ofPriority uint16
+	if priority == nil {
+		ofPriority = priorityLow
+	} else {
+		ofPriority = *priority
+	}
+	conjReg := TFIngressConjIDField
+	labelField := IngressRuleCTLabel
+
+	if _, ok := f.egressTables[tableID]; ok {
+		conjReg = TFEgressConjIDField
+		labelField = EgressRuleCTLabel
+	}
+	conjActionFlow := func(proto binding.Protocol) binding.Flow {
+		ctZone := CtZone
+		if proto == binding.ProtocolIPv6 {
+			ctZone = CtZoneV6
+		}
+		if enableLogging {
+			fb := table.BuildFlow(ofPriority).MatchProtocol(proto).
+				MatchConjID(conjunctionID)
+			if l7RuleVlanID != nil {
+				return fb.
+					Action().LoadToRegField(conjReg, conjunctionID).        // Traceflow.
+					Action().CT(true, nextTable, ctZone, f.ctZoneSrcField). // CT action requires commit flag if actions other than NAT without arguments are specified.
+					LoadToLabelField(uint64(conjunctionID), labelField).
+					LoadToCtMark(L7NPRedirectCTMark).                               // Mark the packets of the connection should be redirected to an application-aware engine.
+					LoadToLabelField(uint64(*l7RuleVlanID), L7NPRuleVlanIDCTLabel). // Load the VLAN ID allocated for L7 NetworkPolicy rule to CT mark field L7NPRuleVlanIDCTMarkField.
+					CTDone().
+					Action().LoadRegMark(DispositionAllowRegMark, L7NPRedirectRegMark, OutputToControllerRegMark). // AntreaPolicy.
+					Action().LoadToRegField(PacketInOperationField, PacketInNPLoggingOperation).
+					Action().LoadToRegField(PacketInTableField, uint32(tableID)).
+					Action().GotoTable(OutputTable.GetID()).
+					Cookie(cookieID).
+					Done()
+			}
+			return fb.
+				Action().LoadToRegField(conjReg, conjunctionID).        // Traceflow.
+				Action().CT(true, nextTable, ctZone, f.ctZoneSrcField). // CT action requires commit flag if actions other than NAT without arguments are specified.
+				LoadToLabelField(uint64(conjunctionID), labelField).
+				CTDone().
+				Action().LoadRegMark(DispositionAllowRegMark, OutputToControllerRegMark). // AntreaPolicy.
+				Action().LoadToRegField(PacketInOperationField, PacketInNPLoggingOperation).
+				Action().LoadToRegField(PacketInTableField, uint32(tableID)).
+				Action().GotoTable(OutputTable.GetID()).
+				Cookie(cookieID).
+				Done()
+		}
+		if l7RuleVlanID != nil {
+			return table.BuildFlow(ofPriority).MatchProtocol(proto).
+				MatchConjID(conjunctionID).
+				Action().LoadToRegField(conjReg, conjunctionID).        // Traceflow.
+				Action().CT(true, nextTable, ctZone, f.ctZoneSrcField). // CT action requires commit flag if actions other than NAT without arguments are specified.
+				LoadToLabelField(uint64(conjunctionID), labelField).
+				LoadToCtMark(L7NPRedirectCTMark).                               // Mark the packets of the connection should be redirected to an application-aware engine.
+				LoadToLabelField(uint64(*l7RuleVlanID), L7NPRuleVlanIDCTLabel). // Load the VLAN ID allocated for L7 NetworkPolicy rule to CT mark field L7NPRuleVlanIDCTMarkField.
+				CTDone().
+				Cookie(cookieID).
+				Done()
+		}
+		return table.BuildFlow(ofPriority).MatchProtocol(proto).
+			MatchConjID(conjunctionID).
+			Action().LoadToRegField(conjReg, conjunctionID).        // Traceflow.
+			Action().CT(true, nextTable, ctZone, f.ctZoneSrcField). // CT action requires commit flag if actions other than NAT without arguments are specified.
+			LoadToLabelField(uint64(conjunctionID), labelField).
+			CTDone().
+			Cookie(cookieID).
+			Done()
+	}
+	var flows []binding.Flow
+	// As IGMP and multicast use a different pipeline 'Multicast', if the rule is
+	// IGMP ingress or multicast egress，conjunctionActionFlow generates the flow
+	// to mark the packet to be allowed if policyRuleConjunction ID is matched.
+	// Any matched flow will be resubmitted to next table in corresponding metric tables.
+	if f.enableMulticast && (tableID == MulticastEgressRuleTable.GetID() || tableID == MulticastIngressRuleTable.GetID()) {
+		flow := table.BuildFlow(ofPriority).MatchConjID(conjunctionID).
+			Action().LoadToRegField(APConjIDField, conjunctionID).
+			Action().NextTable().
+			Cookie(f.cookieAllocator.Request(f.category).Raw()).
+			Done()
+		flows = append(flows, flow)
+		return flows
+	}
+	for _, proto := range f.ipProtocols {
+		flows = append(flows, conjActionFlow(proto))
+	}
+	return flows
+}
+
+// conjunctionActionDenyFlow generates the flow to mark the packet to be denied (dropped or rejected) if policyRuleConjunction
+// ID is matched. Any matched flow will be dropped in corresponding metric tables.
+func (f *featureNetworkPolicy) conjunctionActionDenyFlow(conjunctionID uint32, table binding.Table, priority *uint16,
+	disposition uint32, enableLogging bool) binding.Flow {
+	ofPriority := *priority
+	metricTable := IngressMetricTable
+	tableID := table.GetID()
+	if _, ok := f.egressTables[tableID]; ok {
+		metricTable = EgressMetricTable
+	}
+
+	if f.enableMulticast && tableID == MulticastEgressRuleTable.GetID() {
+		metricTable = MulticastEgressMetricTable
+	}
+	if f.enableMulticast && tableID == MulticastIngressRuleTable.GetID() {
+		metricTable = MulticastIngressMetricTable
+	}
+	flowBuilder := table.BuildFlow(ofPriority).
+		Cookie(f.cookieAllocator.Request(f.category).Raw()).
+		MatchConjID(conjunctionID).
+		Action().LoadToRegField(APConjIDField, conjunctionID).
+		Action().LoadRegMark(APDenyRegMark)
+
+	var packetInOperations uint8
+	if f.enableDenyTracking {
+		packetInOperations += PacketInNPStoreDenyOperation
+		flowBuilder = flowBuilder.
+			Action().LoadToRegField(APDispositionField, disposition)
+	}
+	if enableLogging {
+		packetInOperations += PacketInNPLoggingOperation
+		flowBuilder = flowBuilder.
+			Action().LoadToRegField(APDispositionField, disposition)
+	}
+	if disposition == DispositionRej {
+		packetInOperations += PacketInNPRejectOperation
+	}
+
+	if enableLogging || f.enableDenyTracking || disposition == DispositionRej {
+		groupID := f.getLoggingAndResubmitGroupID(metricTable.GetID())
+		return flowBuilder.Action().LoadToRegField(PacketInOperationField, uint32(packetInOperations)).
+			Action().LoadToRegField(PacketInTableField, uint32(tableID)).
+			Action().Group(groupID).
+			Done()
+	}
+
+	// We do not drop the packet immediately but send the packet to the metric table to update the rule metrics.
+	return flowBuilder.Action().GotoTable(metricTable.GetID()).
+		Done()
+}
+
+func (f *featureNetworkPolicy) conjunctionActionPassFlow(conjunctionID uint32, table binding.Table, priority *uint16, enableLogging bool) binding.Flow {
+	ofPriority := *priority
+	conjReg := TFIngressConjIDField
+	nextTable := IngressRuleTable
+	tableID := table.GetID()
+	if _, ok := f.egressTables[tableID]; ok {
+		conjReg = TFEgressConjIDField
+		nextTable = EgressRuleTable
+	}
+	flowBuilder := table.BuildFlow(ofPriority).
+		Cookie(f.cookieAllocator.Request(f.category).Raw()).
+		MatchConjID(conjunctionID).
+		Action().LoadToRegField(conjReg, conjunctionID)
+
+	if enableLogging {
+		groupID := f.getLoggingAndResubmitGroupID(nextTable.GetID())
+		return flowBuilder.
+			Action().LoadRegMark(DispositionPassRegMark).
+			Action().LoadToRegField(PacketInOperationField, PacketInNPLoggingOperation).
+			Action().LoadToRegField(PacketInTableField, uint32(tableID)).
+			Action().Group(groupID).
+			Done()
+	}
+	return flowBuilder.Action().GotoTable(nextTable.GetID()).
+		Done()
+}
+
+func (f *featureNetworkPolicy) addFlowMatch(fb binding.FlowBuilder, matchKey *types.MatchKey, matchValue interface{}) binding.FlowBuilder {
+	switch matchKey {
+	case MatchDstOFPort:
+		// ofport number in NXM_NX_REG1 is used in ingress rule to match packets sent to local Pod.
+		fb = fb.MatchRegFieldWithValue(TargetOFPortField, uint32(matchValue.(int32)))
+	case MatchSrcOFPort:
+		fb = fb.MatchInPort(uint32(matchValue.(int32)))
+	case MatchDstIP:
+		fallthrough
+	case MatchDstIPv6:
+		fb = fb.MatchProtocol(matchKey.GetOFProtocol()).MatchDstIP(matchValue.(net.IP))
+	case MatchDstIPNet:
+		fallthrough
+	case MatchDstIPNetv6:
+		fb = fb.MatchProtocol(matchKey.GetOFProtocol()).MatchDstIPNet(matchValue.(net.IPNet))
+	case MatchCTDstIP:
+		fallthrough
+	case MatchCTDstIPv6:
+		fb = fb.MatchCTStateNew(true).MatchProtocol(matchKey.GetOFProtocol()).MatchCTDstIP(matchValue.(net.IP))
+	case MatchCTDstIPNet:
+		fallthrough
+	case MatchCTDstIPNetv6:
+		fb = fb.MatchCTStateNew(true).MatchProtocol(matchKey.GetOFProtocol()).MatchCTDstIPNet(matchValue.(net.IPNet))
+	case MatchSrcIP:
+		fallthrough
+	case MatchSrcIPv6:
+		fb = fb.MatchProtocol(matchKey.GetOFProtocol()).MatchSrcIP(matchValue.(net.IP))
+	case MatchSrcIPNet:
+		fb = fb.MatchProtocol(matchKey.GetOFProtocol()).MatchSrcIPNet(matchValue.(net.IPNet))
+	case MatchSrcIPNetv6:
+		fb = fb.MatchProtocol(matchKey.GetOFProtocol()).MatchSrcIPNet(matchValue.(net.IPNet))
+	case MatchCTSrcIP:
+		fallthrough
+	case MatchCTSrcIPv6:
+		fb = fb.MatchCTStateNew(true).MatchProtocol(matchKey.GetOFProtocol()).MatchCTSrcIP(matchValue.(net.IP))
+	case MatchCTSrcIPNet:
+		fallthrough
+	case MatchCTSrcIPNetv6:
+		fb = fb.MatchCTStateNew(true).MatchProtocol(matchKey.GetOFProtocol()).MatchCTSrcIPNet(matchValue.(net.IPNet))
+	case MatchTCPDstPort:
+		fallthrough
+	case MatchTCPv6DstPort:
+		fallthrough
+	case MatchUDPDstPort:
+		fallthrough
+	case MatchUDPv6DstPort:
+		fallthrough
+	case MatchSCTPDstPort:
+		fallthrough
+	case MatchSCTPv6DstPort:
+		fb = fb.MatchProtocol(matchKey.GetOFProtocol())
+		portValue := matchValue.(types.BitRange)
+		if portValue.Value > 0 {
+			fb = fb.MatchDstPort(portValue.Value, portValue.Mask)
+		}
+	case MatchTCPSrcPort:
+		fallthrough
+	case MatchTCPv6SrcPort:
+		fallthrough
+	case MatchUDPSrcPort:
+		fallthrough
+	case MatchUDPv6SrcPort:
+		fb = fb.MatchProtocol(matchKey.GetOFProtocol())
+		portValue := matchValue.(types.BitRange)
+		if portValue.Value > 0 {
+			fb = fb.MatchSrcPort(portValue.Value, portValue.Mask)
+		}
+	case MatchICMPType:
+		fb = fb.MatchProtocol(matchKey.GetOFProtocol())
+		if matchValue != nil {
+			fb = fb.MatchICMPType(uint8(*matchValue.(*int32)))
+		}
+	case MatchICMPCode:
+		fb = fb.MatchProtocol(matchKey.GetOFProtocol())
+		if matchValue != nil {
+			fb = fb.MatchICMPCode(uint8(*matchValue.(*int32)))
+		}
+	case MatchICMPv6Type:
+		fb = fb.MatchProtocol(matchKey.GetOFProtocol())
+		if matchValue != nil {
+			fb = fb.MatchICMPv6Type(uint8(*matchValue.(*int32)))
+		}
+	case MatchICMPv6Code:
+		fb = fb.MatchProtocol(matchKey.GetOFProtocol())
+		if matchValue != nil {
+			fb = fb.MatchICMPv6Code(uint8(*matchValue.(*int32)))
+		}
+	case MatchServiceGroupID:
+		fb = fb.MatchRegFieldWithValue(ServiceGroupIDField, matchValue.(uint32))
+	case MatchIGMPProtocol:
+		fb = fb.MatchProtocol(matchKey.GetOFProtocol())
+	case MatchLabelID:
+		fb = fb.MatchTunnelID(uint64(matchValue.(uint32)))
+	case MatchTCPFlags:
+		fallthrough
+	case MatchTCPv6Flags:
+		fb = fb.MatchProtocol(matchKey.GetOFProtocol())
+		tcpFlag := matchValue.(TCPFlags)
+		fb = fb.MatchTCPFlags(tcpFlag.Flag, tcpFlag.Mask)
+	case MatchCTState:
+		ctState := matchValue.(*openflow15.CTStates)
+		fb = fb.MatchCTState(ctState)
+	}
+	return fb
+}
+
+// conjunctionExceptionFlow generates the flow to jump to a specific table if both policyRuleConjunction ID and except address are matched.
+// Keeping this for reference to generic exception flow.
+// nolint: unused
+func (f *featureNetworkPolicy) conjunctionExceptionFlow(conjunctionID uint32, tableID uint8, nextTable uint8, matchKey *types.MatchKey, matchValue interface{}) binding.Flow {
+	conjReg := TFIngressConjIDField
+	if tableID == EgressRuleTable.GetID() {
+		conjReg = TFEgressConjIDField
+	}
+	fb := getTableByID(tableID).BuildFlow(priorityNormal).MatchConjID(conjunctionID)
+	return f.addFlowMatch(fb, matchKey, matchValue).
+		Action().LoadToRegField(conjReg, conjunctionID). // Traceflow.
+		Action().GotoTable(nextTable).
+		Cookie(f.cookieAllocator.Request(f.category).Raw()).
+		Done()
+}
+
+type conjunctiveActionsInOrder []*conjunctiveAction
+
+func (sl conjunctiveActionsInOrder) Len() int      { return len(sl) }
+func (sl conjunctiveActionsInOrder) Swap(i, j int) { sl[i], sl[j] = sl[j], sl[i] }
+func (sl conjunctiveActionsInOrder) Less(i, j int) bool {
+	if sl[i].conjID != sl[j].conjID {
+		return sl[i].conjID < sl[j].conjID
+	}
+	if sl[i].clauseID != sl[j].clauseID {
+		return sl[i].clauseID < sl[j].clauseID
+	}
+	return sl[i].nClause < sl[j].nClause
+}
+
+// conjunctiveMatchFlow generates the flow to set conjunctive actions if the match condition is matched.
+func (f *featureNetworkPolicy) conjunctiveMatchFlow(tableID uint8, matchPairs []matchPair, priority *uint16, actions []*conjunctiveAction) binding.Flow {
+	var ofPriority uint16
+	if priority != nil {
+		ofPriority = *priority
+	} else {
+		ofPriority = priorityNormal
+	}
+	fb := getTableByID(tableID).BuildFlow(ofPriority)
+	for _, eachMatchPair := range matchPairs {
+		fb = f.addFlowMatch(fb, eachMatchPair.matchKey, eachMatchPair.matchValue)
+	}
+	if f.deterministic {
+		sort.Sort(conjunctiveActionsInOrder(actions))
+	}
+	for _, act := range actions {
+		fb.Action().Conjunction(act.conjID, act.clauseID, act.nClause)
+	}
+	return fb.Cookie(f.cookieAllocator.Request(f.category).Raw()).Done()
+}
+
+// defaultDropFlow generates the flow to drop packets if the match condition is matched.
+func (f *featureNetworkPolicy) defaultDropFlow(table binding.Table, matchPairs []matchPair, enableLogging bool) binding.Flow {
+	cookieID := f.cookieAllocator.Request(f.category).Raw()
+	fb := table.BuildFlow(priorityNormal).Cookie(cookieID)
+	for _, eachMatchPair := range matchPairs {
+		fb = f.addFlowMatch(fb, eachMatchPair.matchKey, eachMatchPair.matchValue)
+	}
+
+	var packetInOperations uint8
+	if f.enableDenyTracking {
+		packetInOperations += PacketInNPStoreDenyOperation
+	}
+	if enableLogging {
+		packetInOperations += PacketInNPLoggingOperation
+	}
+
+	if enableLogging || f.enableDenyTracking {
+		return fb.Action().LoadRegMark(DispositionDropRegMark).
+			Action().LoadToRegField(PacketInOperationField, uint32(packetInOperations)).
+			Action().LoadRegMark(OutputToControllerRegMark).
+			Action().LoadToRegField(PacketInTableField, uint32(table.GetID())).
+			Action().GotoTable(OutputTable.GetID()).
+			Done()
+	}
+	return fb.Action().Drop().
+		Done()
+}
+
+// multiClusterNetworkPolicySecurityDropFlow generates the security drop flows for MultiClusterNetworkPolicy.
+func (f *featureNetworkPolicy) multiClusterNetworkPolicySecurityDropFlow(table binding.Table, matchPairs []matchPair) binding.Flow {
+	cookieID := f.cookieAllocator.Request(f.category).Raw()
+	fb := table.BuildFlow(priorityNormal)
+	fb = f.addFlowMatch(fb, MatchLabelID, UnknownLabelIdentity)
+	for _, eachMatchPair := range matchPairs {
+		fb = f.addFlowMatch(fb, eachMatchPair.matchKey, eachMatchPair.matchValue)
+	}
+	return fb.Cookie(cookieID).Action().Drop().Done()
+}
+
+// dnsPacketInFlow generates the flow to send dns response packets of fqdn policy selected Pods to the fqdnController for
+// processing.
+func (f *featureNetworkPolicy) dnsPacketInFlow(conjunctionID uint32) binding.Flow {
+	fb := AntreaPolicyIngressRuleTable.ofTable.BuildFlow(priorityDNSIntercept).
+		Cookie(f.cookieAllocator.Request(f.category).Raw()).
+		MatchConjID(conjunctionID)
+	if f.ovsMetersAreSupported {
+		fb = fb.Action().Meter(PacketInMeterIDDNS)
+	}
+	// FQDN should pause DNS response packets and send them to the controller. After
+	// the controller processes DNS response packets, like creating related flows in
+	// the OVS or no operations are needed, the controller will resume those packets.
+	return fb.Action().SendToController([]byte{uint8(PacketInCategoryDNS)}, true).
+		Action().GotoTable(IngressMetricTable.GetID()).
+		Done()
+}
+
+// ingressClassifierFlows generates the flows to classify the packets from local Pods or the Antrea gateway to different
+// tables within stageIngressSecurity.
+func (f *featureNetworkPolicy) ingressClassifierFlows() []binding.Flow {
+	cookieID := f.cookieAllocator.Request(f.category).Raw()
+	flows := []binding.Flow{
+		// This generates the flow to match the packets to the Antrea gateway and forward them to IngressMetricTable.
+		IngressSecurityClassifierTable.ofTable.BuildFlow(priorityNormal).
+			Cookie(cookieID).
+			MatchRegMark(ToGatewayRegMark).
+			Action().GotoTable(IngressMetricTable.GetID()).
+			Done(),
+		// This generates the flow to match the packets to tunnel and forward them to IngressMetricTable.
+		IngressSecurityClassifierTable.ofTable.BuildFlow(priorityNormal).
+			Cookie(cookieID).
+			MatchRegMark(ToTunnelRegMark).
+			Action().GotoTable(IngressMetricTable.GetID()).
+			Done(),
+		// This generates the flow to match the packets to uplink and forward them to IngressMetricTable.
+		IngressSecurityClassifierTable.ofTable.BuildFlow(priorityNormal).
+			Cookie(cookieID).
+			MatchRegMark(ToUplinkRegMark).
+			Action().GotoTable(IngressMetricTable.GetID()).
+			Done(),
+		// This generates the flow to match the hairpin service packets and forward them to stageConntrack.
+		IngressSecurityClassifierTable.ofTable.BuildFlow(priorityNormal).
+			Cookie(cookieID).
+			MatchCTMark(HairpinCTMark).
+			Action().GotoStage(stageConntrack).
+			Done(),
+	}
+	if f.enableAntreaPolicy && f.proxyAll {
+		// This generates the flow to match the NodePort Service packets and forward them to AntreaPolicyIngressRuleTable.
+		// Policies applied on NodePort Service will be enforced in AntreaPolicyIngressRuleTable.
+		flows = append(flows, IngressSecurityClassifierTable.ofTable.BuildFlow(priorityNormal+1).
+			Cookie(cookieID).
+			MatchRegMark(ToNodePortAddressRegMark).
+			Action().GotoTable(AntreaPolicyIngressRuleTable.GetID()).
+			Done())
+	}
+	return flows
+}
+
+// flowsToTrace is used to generate flows for Traceflow from globalConjMatchFlowCache and policyCache.
+func (f *featureNetworkPolicy) flowsToTrace(dataplaneTag uint8,
+	ovsMetersAreSupported,
+	liveTraffic,
+	droppedOnly,
+	receiverOnly bool,
+	packet *binding.Packet,
+	ofPort uint32,
+	timeout uint16) []binding.Flow {
+	cookieID := f.cookieAllocator.Request(cookie.Traceflow).Raw()
+	var flows []binding.Flow
+	f.conjMatchFlowLock.Lock()
+	defer f.conjMatchFlowLock.Unlock()
+	for _, ctx := range f.globalConjMatchFlowCache {
+		if ctx.dropFlow != nil {
+			table, err := f.bridge.GetTableByID(ctx.dropFlow.TableId)
+			if err != nil {
+				klog.ErrorS(err, "Failed to get OpenFlow table by tableID", "id", ctx.dropFlow.TableId)
+				continue
+			}
+			dropFlow := f.defaultDropFlow(table, ctx.matchPairs, false)
+			copyFlowBuilder := dropFlow.CopyToBuilder(priorityNormal+2, false)
+			if dropFlow.FlowProtocol() == "" {
+				copyFlowBuilderIPv6 := dropFlow.CopyToBuilder(priorityNormal+2, false)
+				copyFlowBuilderIPv6 = copyFlowBuilderIPv6.MatchProtocol(binding.ProtocolIPv6)
+				if f.ovsMetersAreSupported {
+					copyFlowBuilderIPv6 = copyFlowBuilderIPv6.Action().Meter(PacketInMeterIDTF)
+				}
+				flows = append(flows, copyFlowBuilderIPv6.MatchIPDSCP(dataplaneTag).
+					Cookie(cookieID).
+					SetHardTimeout(timeout).
+					Action().SendToController([]byte{uint8(PacketInCategoryTF)}, false).
+					Done())
+				copyFlowBuilder = copyFlowBuilder.MatchProtocol(binding.ProtocolIP)
+			}
+			if f.ovsMetersAreSupported {
+				copyFlowBuilder = copyFlowBuilder.Action().Meter(PacketInMeterIDTF)
+			}
+			flows = append(flows, copyFlowBuilder.MatchIPDSCP(dataplaneTag).
+				Cookie(cookieID).
+				SetHardTimeout(timeout).
+				Action().SendToController([]byte{uint8(PacketInCategoryTF)}, false).
+				Done())
+		}
+	}
+	// Copy Antrea NetworkPolicy drop rules.
+	for _, obj := range f.policyCache.List() {
+		conj := obj.(*policyRuleConjunction)
+		for _, flow := range conj.metricFlows {
+			table, err := f.bridge.GetTableByID(flow.TableId)
+			if err != nil {
+				klog.ErrorS(err, "Failed to get OpenFlow table by tableID", "id", flow.TableId)
+				continue
+			}
+			if isDropFlow(flow) {
+				conjID := conj.id
+
+				// Generate both IPv4 and IPv6 flows if the original drop flow doesn't match IP/IPv6.
+				// DSCP field is in IP/IPv6 headers so IP/IPv6 match is required in a flow.
+				copyFlowBuilderIPv6 := table.BuildFlow(priorityNormal+2).
+					MatchRegMark(APDenyRegMark).
+					MatchRegFieldWithValue(APConjIDField, conjID).
+					MatchProtocol(binding.ProtocolIPv6)
+				if f.ovsMetersAreSupported {
+					copyFlowBuilderIPv6 = copyFlowBuilderIPv6.Action().Meter(PacketInMeterIDTF)
+				}
+				flows = append(flows, copyFlowBuilderIPv6.MatchIPDSCP(dataplaneTag).
+					SetHardTimeout(timeout).
+					Cookie(cookieID).
+					Action().SendToController([]byte{uint8(PacketInCategoryTF)}, false).
+					Done())
+				copyFlowBuilder := table.BuildFlow(priorityNormal+2).
+					MatchRegMark(APDenyRegMark).
+					MatchRegFieldWithValue(APConjIDField, conjID).MatchProtocol(binding.ProtocolIP)
+				if f.ovsMetersAreSupported {
+					copyFlowBuilder = copyFlowBuilder.Action().Meter(PacketInMeterIDTF)
+				}
+				flows = append(flows, copyFlowBuilder.MatchIPDSCP(dataplaneTag).
+					SetHardTimeout(timeout).
+					Cookie(cookieID).
+					Action().SendToController([]byte{uint8(PacketInCategoryTF)}, false).
+					Done())
+			}
+		}
+	}
+	return flows
+}
+
 func (f *featureNetworkPolicy) initGroups() []binding.OFEntry {
 	var groups []binding.OFEntry
 	candidateTables := []*Table{EgressRuleTable, EgressMetricTable, IngressRuleTable, IngressMetricTable}
@@ -2313,4 +2493,58 @@ func (f *featureNetworkPolicy) getLoggingAndResubmitGroupID(nextTable uint8) bin
 
 func (f *featureNetworkPolicy) replayGroups() []binding.OFEntry {
 	return nil
+}
+
+func (f *featureNetworkPolicy) getRequiredTables() []*Table {
+	tables := []*Table{
+		EgressRuleTable,
+		EgressDefaultTable,
+		EgressMetricTable,
+		IngressSecurityClassifierTable,
+		IngressRuleTable,
+		IngressDefaultTable,
+		IngressMetricTable,
+	}
+	if f.enableAntreaPolicy {
+		tables = append(tables,
+			AntreaPolicyEgressRuleTable,
+			AntreaPolicyIngressRuleTable,
+		)
+		if f.enableL7NetworkPolicy {
+			tables = append(tables, TrafficControlTable) // For L7 NetworkPolicy.
+		}
+		if f.enableMulticast {
+			tables = append(tables,
+				MulticastEgressRuleTable,
+				MulticastEgressPodMetricTable,
+				MulticastEgressMetricTable,
+				MulticastIngressRuleTable,
+				MulticastIngressPodMetricTable,
+				MulticastIngressMetricTable,
+			)
+		}
+	}
+	if f.nodeType == config.ExternalNode {
+		tables = append(tables,
+			EgressSecurityClassifierTable,
+		)
+	}
+	return tables
+}
+
+// isDropFlow returns true if no instructions are defined in the OpenFlow modification message.
+// According to the OpenFlow spec, there is no explicit action to represent drops. Instead, the action of dropping
+// packets could come from empty instruction sets.
+func isDropFlow(f *openflow15.FlowMod) bool {
+	return len(f.Instructions) == 0
+}
+
+func copyFlowWithNewPriority(flowMod *openflow15.FlowMod, priority uint16) *openflow15.FlowMod {
+	newFlow := *flowMod
+	newFlow.Priority = priority
+	return &newFlow
+}
+
+func flowMessageMatched(oldFlow, newFlow *openflow15.FlowMod) bool {
+	return oldFlow.Priority == newFlow.Priority && getFlowKey(oldFlow) == getFlowKey(newFlow)
 }

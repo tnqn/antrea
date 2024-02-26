@@ -15,6 +15,7 @@
 package openflow
 
 import (
+	"antrea.io/antrea/pkg/agent/types"
 	"net"
 	"sync"
 
@@ -79,6 +80,157 @@ func newFeatureEgress(cookieAllocator cookie.Allocator,
 	}
 }
 
+// snatSkipCIDRFlow generates the flow to skip SNAT for connection destined for the provided CIDR.
+func (f *featureEgress) snatSkipCIDRFlow(cidr net.IPNet) binding.Flow {
+	ipProtocol := getIPProtocol(cidr.IP)
+	return EgressMarkTable.ofTable.BuildFlow(priorityHigh).
+		Cookie(f.cookieAllocator.Request(f.category).Raw()).
+		MatchProtocol(ipProtocol).
+		MatchDstIPNet(cidr).
+		Action().LoadRegMark(ToGatewayRegMark).
+		Action().GotoStage(stageSwitching).
+		Done()
+}
+
+// snatSkipNodeFlow generates the flow to skip SNAT for connection destined for the transport IP of a remote Node.
+func (f *featureEgress) snatSkipNodeFlow(nodeIP net.IP) binding.Flow {
+	ipProtocol := getIPProtocol(nodeIP)
+	return EgressMarkTable.ofTable.BuildFlow(priorityHigh).
+		Cookie(f.cookieAllocator.Request(f.category).Raw()).
+		MatchProtocol(ipProtocol).
+		MatchDstIP(nodeIP).
+		Action().LoadRegMark(ToGatewayRegMark).
+		Action().GotoStage(stageSwitching).
+		Done()
+}
+
+// snatIPFromTunnelFlow generates the flow that marks SNAT packets tunnelled from remote Nodes. The SNAT IP matches the
+// packet's tunnel destination IP.
+func (f *featureEgress) snatIPFromTunnelFlow(snatIP net.IP, mark uint32) binding.Flow {
+	ipProtocol := getIPProtocol(snatIP)
+	fb := EgressMarkTable.ofTable.BuildFlow(priorityNormal).
+		Cookie(f.cookieAllocator.Request(f.category).Raw()).
+		MatchProtocol(ipProtocol).
+		MatchCTStateTrk(true).
+		MatchTunnelDst(snatIP).
+		Action().LoadPktMarkRange(mark, snatPktMarkRange).
+		Action().LoadRegMark(ToGatewayRegMark)
+	if f.enableEgressTrafficShaping {
+		// To apply rate-limit on all traffic.
+		fb = fb.Action().GotoTable(EgressQoSTable.GetID())
+	} else {
+		fb = fb.Action().GotoStage(stageSwitching)
+	}
+	return fb.Done()
+}
+
+// snatRuleFlow generates the flow that applies the SNAT rule for a local Pod. If the SNAT IP exists on the local Node,
+// it sets the packet mark with the ID of the SNAT IP, for the traffic from local Pods to external; if the SNAT IP is
+// on a remote Node, it tunnels the packets to the remote Node.
+func (f *featureEgress) snatRuleFlow(ofPort uint32, snatIP net.IP, snatMark uint32, localGatewayMAC net.HardwareAddr) binding.Flow {
+	cookieID := f.cookieAllocator.Request(f.category).Raw()
+	ipProtocol := getIPProtocol(snatIP)
+	if snatMark != 0 {
+		// Local SNAT IP.
+		fb := EgressMarkTable.ofTable.BuildFlow(priorityNormal).
+			Cookie(cookieID).
+			MatchProtocol(ipProtocol).
+			MatchCTStateTrk(true).
+			MatchInPort(ofPort).
+			Action().LoadPktMarkRange(snatMark, snatPktMarkRange).
+			Action().LoadRegMark(ToGatewayRegMark)
+		if f.enableEgressTrafficShaping {
+			// To apply rate-limit on all traffic.
+			fb = fb.Action().GotoTable(EgressQoSTable.GetID())
+		} else {
+			fb = fb.Action().GotoStage(stageSwitching)
+		}
+		return fb.Done()
+	}
+	// SNAT IP should be on a remote Node.
+	return EgressMarkTable.ofTable.BuildFlow(priorityNormal).
+		Cookie(cookieID).
+		MatchProtocol(ipProtocol).
+		MatchInPort(ofPort).
+		Action().SetSrcMAC(localGatewayMAC).
+		Action().SetDstMAC(GlobalVirtualMAC).
+		Action().SetTunnelDst(snatIP). // Set tunnel destination to the SNAT IP.
+		Action().LoadRegMark(ToTunnelRegMark, RemoteSNATRegMark).
+		Action().GotoStage(stageSwitching).
+		Done()
+}
+
+func (f *featureEgress) egressQoSFlow(mark uint32) binding.Flow {
+	return EgressQoSTable.ofTable.BuildFlow(priorityNormal).
+		Cookie(f.cookieAllocator.Request(f.category).Raw()).
+		MatchPktMark(mark, &types.SNATIPMarkMask).
+		Action().Meter(mark).
+		Action().GotoStage(stageSwitching).
+		Done()
+}
+
+func (f *featureEgress) egressQoSDefaultFlow() binding.Flow {
+	return EgressQoSTable.ofTable.BuildFlow(priorityLow).
+		Cookie(f.cookieAllocator.Request(f.category).Raw()).
+		Action().GotoStage(stageSwitching).
+		Done()
+}
+
+// externalFlows generates the flows to perform SNAT for the packets of connection to the external network. The flows identify
+// the packets to external network, and send them to EgressMarkTable, where SNAT IPs are looked up for the packets.
+func (f *featureEgress) externalFlows() []binding.Flow {
+	cookieID := f.cookieAllocator.Request(f.category).Raw()
+	var flows []binding.Flow
+	for _, ipProtocol := range f.ipProtocols {
+		flows = append(flows,
+			// This generates the flow to match the packets sourced from local Pods and destined for external network, then
+			// forward them to EgressMarkTable.
+			L3ForwardingTable.ofTable.BuildFlow(priorityLow).
+				Cookie(cookieID).
+				MatchProtocol(ipProtocol).
+				MatchCTStateRpl(false).
+				MatchCTStateTrk(true).
+				MatchRegMark(FromLocalRegMark, NotAntreaFlexibleIPAMRegMark).
+				Action().GotoTable(EgressMarkTable.GetID()).
+				Done(),
+			// This generates the flow to match the packets sourced from tunnel and destined for external network, then
+			// forward them to EgressMarkTable.
+			L3ForwardingTable.ofTable.BuildFlow(priorityLow).
+				Cookie(cookieID).
+				MatchProtocol(ipProtocol).
+				MatchCTStateRpl(false).
+				MatchCTStateTrk(true).
+				MatchRegMark(FromTunnelRegMark).
+				Action().SetDstMAC(f.gatewayMAC).
+				Action().GotoTable(EgressMarkTable.GetID()).
+				Done(),
+			// This generates the default flow to drop the packets from remote Nodes and there is no matched SNAT policy.
+			EgressMarkTable.ofTable.BuildFlow(priorityLow).
+				Cookie(cookieID).
+				MatchProtocol(ipProtocol).
+				MatchCTStateNew(true).
+				MatchCTStateTrk(true).
+				MatchRegMark(FromTunnelRegMark).
+				Action().Drop().
+				Done(),
+			// This generates the flow to bypass the packets destined for local Node.
+			f.snatSkipNodeFlow(f.nodeIPs[ipProtocol]),
+		)
+		// This generates the flows to bypass the packets sourced from local Pods and destined for the except CIDRs for Egress.
+		for _, cidr := range f.exceptCIDRs[ipProtocol] {
+			flows = append(flows, f.snatSkipCIDRFlow(cidr))
+		}
+	}
+	// This generates the flow to match the packets of tracked Egress connection and forward them to stageSwitching.
+	flows = append(flows, EgressMarkTable.ofTable.BuildFlow(priorityMiss).
+		Cookie(cookieID).
+		Action().LoadRegMark(ToGatewayRegMark).
+		Action().GotoStage(stageSwitching).
+		Done())
+
+	return flows
+}
+
 func (f *featureEgress) initFlows() []*openflow15.FlowMod {
 	// This installs the flows to enable Pods to communicate to the external IP addresses. The flows identify the packets
 	// from local Pods to the external IP address, and mark the packets to be SNAT'd with the configured SNAT IPs.
@@ -110,4 +262,15 @@ func (f *featureEgress) replayMeters() []binding.OFEntry {
 		return true
 	})
 	return meters
+}
+
+func (f *featureEgress) getRequiredTables() []*Table {
+	tables := []*Table{
+		L3ForwardingTable,
+		EgressMarkTable,
+	}
+	if f.enableEgressTrafficShaping {
+		tables = append(tables, EgressQoSTable)
+	}
+	return tables
 }

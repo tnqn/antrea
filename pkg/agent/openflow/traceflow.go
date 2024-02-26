@@ -53,3 +53,7 @@ func (f *featureTraceflow) replayGroups() []binding.OFEntry {
 func (f *featureTraceflow) replayMeters() []binding.OFEntry {
 	return nil
 }
+
+func (f *featureTraceflow) getRequiredTables() []*Table {
+	return nil
+}

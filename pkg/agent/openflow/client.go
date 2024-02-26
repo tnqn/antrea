@@ -15,9 +15,17 @@
 package openflow
 
 import (
+	"antrea.io/antrea/pkg/agent/nodeip"
+	"antrea.io/antrea/pkg/agent/openflow/operation"
+	"antrea.io/antrea/pkg/ovs/ovsctl"
 	"fmt"
+	"k8s.io/apimachinery/pkg/util/wait"
+	"k8s.io/client-go/tools/cache"
 	"math/rand"
 	"net"
+	"strings"
+	"sync"
+	"time"
 
 	"antrea.io/libOpenflow/openflow15"
 	"antrea.io/libOpenflow/protocol"
@@ -408,6 +416,184 @@ type Client interface {
 	// or ip, port, protocol and direction. It is used to bypass NetworkPolicy enforcement on a VM for the particular
 	// traffic.
 	InstallPolicyBypassFlows(protocol binding.Protocol, ipNet *net.IPNet, port uint16, isIngress bool) error
+}
+
+type client struct {
+	enableProxy                bool
+	proxyAll                   bool
+	enableDSR                  bool
+	enableAntreaPolicy         bool
+	enableL7NetworkPolicy      bool
+	enableDenyTracking         bool
+	enableEgress               bool
+	enableEgressTrafficShaping bool
+	enableMulticast            bool
+	enableTrafficControl       bool
+	enableL7FlowExporter       bool
+	enableMulticluster         bool
+	enablePrometheusMetrics    bool
+	connectUplinkToBridge      bool
+	nodeType                   config.NodeType
+	roundInfo                  types.RoundInfo
+	cookieAllocator            cookie.Allocator
+	bridge                     binding.Bridge
+	groupIDAllocator           GroupAllocator
+
+	featurePodConnectivity          *featurePodConnectivity
+	featureService                  *featureService
+	featureEgress                   *featureEgress
+	featureNetworkPolicy            *featureNetworkPolicy
+	featureMulticast                *featureMulticast
+	featureMulticluster             *featureMulticluster
+	featureExternalNodeConnectivity *featureExternalNodeConnectivity
+	activatedFeatures               []feature
+
+	featureTraceflow  *featureTraceflow
+	traceableFeatures []traceableFeature
+
+	pipelines  map[binding.PipelineID]binding.Pipeline
+	tableCache cache.Indexer
+
+	// ofEntryOperations is a wrapper interface for operating multiple OpenFlow entries with action AddAll / ModifyAll / DeleteAll.
+	// It enables convenient mocking in unit tests.
+	ofEntryOperations operation.OFEntryOperations
+	// replayMutex provides exclusive access to the OFSwitch to the ReplayFlows method.
+	replayMutex           sync.RWMutex
+	nodeConfig            *config.NodeConfig
+	networkConfig         *config.NetworkConfig
+	egressConfig          *config.EgressConfig
+	serviceConfig         *config.ServiceConfig
+	l7NetworkPolicyConfig *config.L7NetworkPolicyConfig
+	// ovsMetersAreSupported indicates whether the OVS datapath supports OpenFlow meters.
+	ovsMetersAreSupported bool
+	// packetInRate defines the OVS controller packet rate limits for different
+	// features. All features will apply this rate-limit individually on packet-in
+	// messages sent to antrea-agent. The number stands for the rate as packets per
+	// second(pps) and the burst size will be automatically set to twice the rate.
+	// When the rate and burst size are exceeded, new packets will be dropped.
+	packetInRate int
+	// packetInHandlers stores handler to process PacketIn event. When a packetIn
+	// arrives, openflow send packet to registered handler in this map.
+	packetInHandlers map[uint8]PacketInHandler
+	// Supported IP Protocols (IP or IPv6) on the current Node.
+	ipProtocols []binding.Protocol
+	// ovsctlClient is the interface for executing OVS "ovs-ofctl" and "ovs-appctl" commands.
+	ovsctlClient ovsctl.OVSCtlClient
+
+	nodeIPChecker nodeip.Checker
+}
+
+// NewClient is the constructor of the Client interface.
+func NewClient(bridgeName string,
+	mgmtAddr string,
+	nodeIPCheck nodeip.Checker,
+	enableProxy bool,
+	enableAntreaPolicy bool,
+	enableL7NetworkPolicy bool,
+	enableEgress bool,
+	enableEgressTrafficShaping bool,
+	enableDenyTracking bool,
+	proxyAll bool,
+	enableDSR bool,
+	connectUplinkToBridge bool,
+	enableMulticast bool,
+	enableTrafficControl bool,
+	enableL7FlowExporter bool,
+	enableMulticluster bool,
+	groupIDAllocator GroupAllocator,
+	enablePrometheusMetrics bool,
+	packetInRate int,
+) *client {
+	bridge := binding.NewOFBridge(bridgeName, mgmtAddr)
+	c := &client{
+		bridge:                     bridge,
+		nodeIPChecker:              nodeIPCheck,
+		enableProxy:                enableProxy,
+		proxyAll:                   proxyAll,
+		enableDSR:                  enableDSR,
+		enableAntreaPolicy:         enableAntreaPolicy,
+		enableL7NetworkPolicy:      enableL7NetworkPolicy,
+		enableDenyTracking:         enableDenyTracking,
+		enableEgress:               enableEgress,
+		enableEgressTrafficShaping: enableEgressTrafficShaping,
+		enableMulticast:            enableMulticast,
+		enableTrafficControl:       enableTrafficControl,
+		enableL7FlowExporter:       enableL7FlowExporter,
+		enableMulticluster:         enableMulticluster,
+		enablePrometheusMetrics:    enablePrometheusMetrics,
+		connectUplinkToBridge:      connectUplinkToBridge,
+		pipelines:                  make(map[binding.PipelineID]binding.Pipeline),
+		tableCache:                 cache.NewIndexer(tableIDKeyFunc, cache.Indexers{tableNameIndex: tableNameIndexFunc}),
+		packetInHandlers:           map[uint8]PacketInHandler{},
+		ovsctlClient:               ovsctl.NewClient(bridgeName),
+		ovsMetersAreSupported:      OVSMetersAreSupported(),
+		packetInRate:               packetInRate,
+		groupIDAllocator:           groupIDAllocator,
+	}
+	c.ofEntryOperations = operation.NewOFEntryOperations(bridge)
+	return c
+}
+
+func (c *client) Run(stopCh <-chan struct{}) {
+	// Start PacketIn
+	c.StartPacketInHandler(stopCh)
+	// Start OVS meter stats collection
+	if c.enablePrometheusMetrics {
+		if c.ovsMetersAreSupported {
+			klog.Info("Start collecting OVS meter stats")
+			go wait.Until(c.getMeterStats, time.Second*30, stopCh)
+		}
+	}
+}
+
+func (c *client) GetTunnelVirtualMAC() net.HardwareAddr {
+	return GlobalVirtualMAC
+}
+
+func (c *client) defaultFlows() []*openflow15.FlowMod {
+	cookieID := c.cookieAllocator.Request(cookie.Default).Raw()
+	var flows []binding.Flow
+	for id, pipeline := range c.pipelines {
+		// This generates the default flow for every table in every pipeline.
+		for _, table := range pipeline.ListAllTables() {
+			flowBuilder := table.BuildFlow(priorityMiss).Cookie(cookieID)
+			switch table.GetMissAction() {
+			case binding.TableMissActionNext:
+				flowBuilder = flowBuilder.Action().NextTable()
+			case binding.TableMissActionNormal:
+				flowBuilder = flowBuilder.Action().Normal()
+			case binding.TableMissActionDrop:
+				flowBuilder = flowBuilder.Action().Drop()
+			case binding.TableMissActionNone:
+				fallthrough
+			default:
+				continue
+			}
+			flows = append(flows, flowBuilder.Done())
+		}
+
+		switch id {
+		case pipelineIP:
+			// This generates the flow to match IPv4 / IPv6 packets and forward them to the first table of pipelineIP in
+			// PipelineRootClassifierTable.
+			for _, ipProtocol := range c.ipProtocols {
+				flows = append(flows, pipelineClassifyFlow(cookieID, ipProtocol, pipeline))
+			}
+		case pipelineARP:
+			// This generates the flow to match ARP packets and forward them to the first table of pipelineARP in
+			// PipelineRootClassifierTable.
+			flows = append(flows, pipelineClassifyFlow(cookieID, binding.ProtocolARP, pipeline))
+		case pipelineMulticast:
+			// This generates the flow to match multicast packets and forward them to the first table of pipelineMulticast
+			// in PipelineIPClassifierTable. Note that, PipelineIPClassifierTable is in stageValidation of pipeline for IP. In another word,
+			// pipelineMulticast is forked from PipelineIPClassifierTable in pipelineIP.
+			flows = append(flows, multicastPipelineClassifyFlow(cookieID, pipeline))
+		case pipelineNonIP:
+			flows = append(flows, nonIPPipelineClassifyFlow(cookieID, pipeline))
+		}
+	}
+
+	return GetFlowModMessages(flows, binding.AddMessage)
 }
 
 // GetFlowTableStatus returns an array of flow table status.
@@ -1034,7 +1220,7 @@ func (c *client) generatePipelines() {
 			continue
 		}
 		// generate a pipeline from the required table list.
-		c.pipelines[pipelineID] = generatePipeline(pipelineID, requiredTables)
+		c.pipelines[pipelineID] = c.generatePipeline(pipelineID, requiredTables)
 	}
 }
 
@@ -1696,4 +1882,606 @@ func (c *client) getMeterStats() {
 	if err := c.bridge.GetMeterStats(handleMeterStatsReply); err != nil {
 		klog.ErrorS(err, "Failed to get OVS meter stats")
 	}
+}
+
+// genOFMeter generates a meter entry with specific meterID, meterFlag, rate and
+// burst. Packets which exceed the rate will be dropped.
+func (c *client) genOFMeter(meterID binding.MeterIDType, meterFlags ofctrl.MeterFlag, rate uint32, burst uint32) binding.Meter {
+	meter := c.bridge.NewMeter(meterID, meterFlags).
+		MeterBand().
+		MeterType(ofctrl.MeterDrop).
+		Rate(rate).
+		Burst(burst).
+		Done()
+	return meter
+}
+
+func (c *client) Disconnect() error {
+	return c.bridge.Disconnect()
+}
+
+func (c *client) InstallVMUplinkFlows(hostIFName string, hostPort int32, uplinkPort int32) error {
+	flows := c.featureExternalNodeConnectivity.vmUplinkFlows(uint32(hostPort), uint32(uplinkPort))
+	return c.addFlows(c.featureExternalNodeConnectivity.uplinkFlowCache, hostIFName, flows)
+}
+
+func (c *client) UninstallVMUplinkFlows(hostIFName string) error {
+	return c.deleteFlows(c.featureExternalNodeConnectivity.uplinkFlowCache, hostIFName)
+}
+
+func (c *client) InstallPolicyBypassFlows(protocol binding.Protocol, ipNet *net.IPNet, port uint16, isIngress bool) error {
+	flow := c.featureExternalNodeConnectivity.policyBypassFlow(protocol, ipNet, port, isIngress)
+	flowMessages := GetFlowModMessages([]binding.Flow{flow}, binding.AddMessage)
+	if err := c.ofEntryOperations.AddAll(flowMessages); err != nil {
+		return err
+	}
+	return c.featureExternalNodeConnectivity.addPolicyBypassFlows(flow)
+}
+
+func getCachedFlowMessages(cache *flowCategoryCache) []*openflow15.FlowMod {
+	var flows []*openflow15.FlowMod
+	cache.Range(func(key, value interface{}) bool {
+		fCache := value.(flowMessageCache)
+		for _, flow := range fCache {
+			flows = append(flows, flow)
+		}
+		return true
+	})
+	return flows
+}
+
+func getFlowKey(fm *openflow15.FlowMod) string {
+	return binding.FlowModMatchString(fm)
+}
+
+type flowMessageCache map[string]*openflow15.FlowMod
+
+type flowCategoryCache struct {
+	sync.Map
+}
+
+func getIPProtocol(ip net.IP) binding.Protocol {
+	var ipProtocol binding.Protocol
+	if ip.To4() != nil {
+		ipProtocol = binding.ProtocolIP
+	} else {
+		ipProtocol = binding.ProtocolIPv6
+	}
+	return ipProtocol
+}
+
+func newFlowCategoryCache() *flowCategoryCache {
+	return &flowCategoryCache{}
+}
+
+func (c *client) generatePipeline(pipelineID binding.PipelineID, requiredTables []*Table) binding.Pipeline {
+	var ofTables []binding.Table
+	for _, table := range requiredTables {
+		// Generate a sequencing ID for the flow table.
+		tableID := binding.NextTableID()
+		// Initialize a flow table.
+		table.ofTable = binding.NewOFTable(tableID, table.name, table.stage, pipelineID, table.missAction)
+		ofTables = append(ofTables, table.ofTable)
+		c.tableCache.Add(table)
+	}
+	return binding.NewPipeline(pipelineID, ofTables)
+}
+
+// realizePipelines sets next ID and missing action for every flow table in every pipeline and realize it on OVS bridge.
+func (c *client) realizePipelines() {
+	for _, pipeline := range c.pipelines {
+		tables := pipeline.ListAllTables()
+		for i := range tables {
+			var nextID uint8
+			var missAction binding.MissActionType
+			if pipeline.IsLastTable(tables[i]) {
+				// For the last table in a pipeline, set the miss action to TableMissActionDrop and next ID to LastTableID.
+				nextID = binding.LastTableID
+				missAction = binding.TableMissActionDrop
+			} else {
+				nextID = tables[i+1].GetID()
+				// For a table (not the last one) in a pipeline, set the next ID to the next table ID. If the miss action
+				// of the table is TableMissActionNone, set the miss action to TableMissActionNext.
+				if tables[i].GetMissAction() != binding.TableMissActionNone {
+					missAction = tables[i].GetMissAction()
+				} else {
+					missAction = binding.TableMissActionNext
+				}
+			}
+			tables[i].SetNext(nextID)
+			tables[i].SetMissAction(missAction)
+			c.bridge.NewTable(tables[i], nextID, missAction)
+		}
+	}
+}
+
+func pipelineClassifyFlow(cookieID uint64, protocol binding.Protocol, pipeline binding.Pipeline) binding.Flow {
+	targetTable := pipeline.GetFirstTable()
+	return PipelineRootClassifierTable.ofTable.BuildFlow(priorityNormal).
+		Cookie(cookieID).
+		MatchProtocol(protocol).
+		Action().GotoTable(targetTable.GetID()).
+		Done()
+}
+
+func multicastPipelineClassifyFlow(cookieID uint64, pipeline binding.Pipeline) binding.Flow {
+	targetTable := pipeline.GetFirstTable()
+	return PipelineIPClassifierTable.ofTable.BuildFlow(priorityHigh).
+		Cookie(cookieID).
+		MatchProtocol(binding.ProtocolIP).
+		MatchDstIPNet(*types.McastCIDR).
+		Action().ResubmitToTables(targetTable.GetID()).
+		Done()
+}
+
+// nonIPPipelineClassifyFlow generates a flow in PipelineClassifierTable to resubmit packets not using IP protocols to
+// pipelineNonIP.
+func nonIPPipelineClassifyFlow(cookieID uint64, pipeline binding.Pipeline) binding.Flow {
+	targetTable := pipeline.GetFirstTable()
+	return PipelineRootClassifierTable.ofTable.BuildFlow(priorityLow).
+		Cookie(cookieID).
+		Action().GotoTable(targetTable.GetID()).
+		Done()
+}
+
+func getZoneSrcField(connectUplinkToBridge bool) *binding.RegField {
+	if connectUplinkToBridge {
+		return CtZoneField
+	}
+	return nil
+}
+
+func (c *client) NewDNSPacketInConjunction(id uint32) error {
+	existingConj := c.featureNetworkPolicy.getPolicyRuleConjunction(id)
+	if existingConj != nil {
+		klog.InfoS("DNS Conjunction has already been added to cache", "id", id)
+		return nil
+	}
+	conj := &policyRuleConjunction{
+		id:          id,
+		ruleTableID: AntreaPolicyIngressRuleTable.ofTable.GetID(),
+		actionFlows: GetFlowModMessages([]binding.Flow{c.featureNetworkPolicy.dnsPacketInFlow(id)}, binding.AddMessage),
+	}
+	if err := c.ofEntryOperations.AddAll(conj.actionFlows); err != nil {
+		return fmt.Errorf("error when adding action flows for the DNS conjunction: %w", err)
+	}
+
+	dnsPriority := priorityDNSIntercept
+	dnsCTState := &openflow15.CTStates{
+		// Use ct_state=+trk+rpl as matching condition.
+		// CTState bit-state map:
+		// dnat | snat | trk | inv | rpl | rel | est | new
+		Data: 0b00101000,
+		Mask: 0b00101000,
+	}
+	dnsPortMatchValue := types.BitRange{Value: uint16(dnsPort)}
+
+	conj.serviceClause = conj.newClause(1, 2, c.getTableByID(conj.ruleTableID), nil)
+	conj.toClause = conj.newClause(2, 2, c.getTableByID(conj.ruleTableID), nil)
+	c.featureNetworkPolicy.conjMatchFlowLock.Lock()
+	defer c.featureNetworkPolicy.conjMatchFlowLock.Unlock()
+	var ctxChanges []*conjMatchFlowContextChange
+	for _, proto := range c.featureNetworkPolicy.ipProtocols {
+		tcpMatch := &conjunctiveMatch{
+			tableID:  conj.serviceClause.ruleTable.GetID(),
+			priority: &dnsPriority,
+			matchPairs: []matchPair{
+				{
+					matchKey:   MatchCTState,
+					matchValue: dnsCTState,
+				},
+			},
+		}
+		udpMatch := &conjunctiveMatch{
+			tableID:  conj.serviceClause.ruleTable.GetID(),
+			priority: &dnsPriority,
+			matchPairs: []matchPair{
+				// Add CTState for UDP as well to make sure only solicited DNS responses are sent
+				// to userspace.
+				{
+					matchKey:   MatchCTState,
+					matchValue: dnsCTState,
+				},
+			},
+		}
+		if proto == binding.ProtocolIP {
+			tcpMatch.matchPairs = append(tcpMatch.matchPairs, matchPair{
+				matchKey:   MatchTCPSrcPort,
+				matchValue: dnsPortMatchValue,
+			})
+			udpMatch.matchPairs = append(udpMatch.matchPairs, matchPair{
+				matchKey:   MatchUDPSrcPort,
+				matchValue: dnsPortMatchValue,
+			})
+		} else if proto == binding.ProtocolIPv6 {
+			tcpMatch.matchPairs = append(tcpMatch.matchPairs, matchPair{
+				matchKey:   MatchTCPv6SrcPort,
+				matchValue: dnsPortMatchValue,
+			})
+			udpMatch.matchPairs = append(udpMatch.matchPairs, matchPair{
+				matchKey:   MatchUDPv6SrcPort,
+				matchValue: dnsPortMatchValue,
+			})
+		}
+		tcpCtxChange := conj.serviceClause.addConjunctiveMatchFlow(c.featureNetworkPolicy, tcpMatch, false, false)
+		udpCtxChange := conj.serviceClause.addConjunctiveMatchFlow(c.featureNetworkPolicy, udpMatch, false, false)
+		ctxChanges = append(ctxChanges, tcpCtxChange, udpCtxChange)
+	}
+	if err := c.featureNetworkPolicy.applyConjunctiveMatchFlows(ctxChanges); err != nil {
+		return err
+	}
+	// Add the policyRuleConjunction into policyCache
+	c.featureNetworkPolicy.policyCache.Add(conj)
+	return nil
+}
+
+func (c *client) AddAddressToDNSConjunction(id uint32, addrs []types.Address) error {
+	dnsPriority := priorityDNSIntercept
+	return c.AddPolicyRuleAddress(id, types.DstAddress, addrs, &dnsPriority, false, false)
+}
+
+func (c *client) DeleteAddressFromDNSConjunction(id uint32, addrs []types.Address) error {
+	dnsPriority := priorityDNSIntercept
+	return c.DeletePolicyRuleAddress(id, types.DstAddress, addrs, &dnsPriority)
+}
+
+// InstallPolicyRuleFlows installs flows for a new NetworkPolicy rule. Rule should include all fields in the
+// NetworkPolicy rule. Each ingress/egress policy rule installs Openflow entries on two tables, one for ruleTable and
+// the other for dropTable. If a packet does not pass the ruleTable, it will be dropped by the dropTable.
+// NetworkPolicyController will make sure only one goroutine operates on a PolicyRule and addresses in the rule.
+// For a normal NetworkPolicy rule, these Openflow entries are installed: 1) 1 conjunction action flow; 2) multiple
+// conjunctive match flows, the flow number depends on addresses in rule.From and rule.To, or if
+// rule.FromExcepts/rule.ToExcepts are present, flow number is equal to diff of addresses between rule.From and
+// rule.FromExcepts, and diff addresses between rule.To and rule.ToExcepts, and in addition number includes service ports
+// in rule.Service; and 3) multiple default drop flows, the number is dependent on the addresses in rule.From for
+// an egress rule, and addresses in rule.To for an ingress rule.
+// For ALLOW-ALL rule, the Openflow entries installed on the switch are similar to a normal rule. The differences include,
+// 1) rule.Service is nil; and 2) rule.To has only one address "0.0.0.0/0" for egress rule, and rule.From is "0.0.0.0/0"
+// for ingress rule.
+// For DENY-ALL rule, only the default drop flow is installed for the addresses in rule.From for egress rule, or
+// addresses in rule.To for ingress rule. No conjunctive match flow or conjunction action except flows are installed.
+// A DENY-ALL rule is configured with rule.ID, rule.Direction, and either rule.From(egress rule) or rule.To(ingress rule).
+// Other fields in the rule should be nil.
+// If there is an error in any clause's addAddrFlows or addServiceFlows, the conjunction action flow will never be hit.
+// If the default drop flow is already installed before this error, all packets will be dropped by the default drop flow,
+// Otherwise all packets will be allowed.
+func (c *client) InstallPolicyRuleFlows(rule *types.PolicyRule) error {
+	c.replayMutex.RLock()
+	defer c.replayMutex.RUnlock()
+
+	conj := c.featureNetworkPolicy.calculateActionFlowChangesForRule(rule)
+
+	c.featureNetworkPolicy.conjMatchFlowLock.Lock()
+	defer c.featureNetworkPolicy.conjMatchFlowLock.Unlock()
+	ctxChanges := c.featureNetworkPolicy.calculateMatchFlowChangesForRule(conj, rule)
+
+	var flowMessages []*openflow15.FlowMod
+	for _, fm := range append(conj.metricFlows, conj.actionFlows...) {
+		flowMessages = append(flowMessages, fm)
+	}
+	if err := c.ofEntryOperations.AddAll(flowMessages); err != nil {
+		return err
+	}
+	if err := c.featureNetworkPolicy.applyConjunctiveMatchFlows(ctxChanges); err != nil {
+		return err
+	}
+	// Add the policyRuleConjunction into policyCache
+	c.featureNetworkPolicy.policyCache.Add(conj)
+	return nil
+}
+
+// BatchInstallPolicyRuleFlows installs flows for NetworkPolicy rules in case of agent restart. It calculates and
+// accumulates all Openflow entry updates required and installs all of them on OVS bridge in one bundle.
+// It resets the global conjunctive match flow cache upon failure, and should NOT be used after any rule is installed
+// via the InstallPolicyRuleFlows method. Otherwise the cache would be out of sync.
+func (c *client) BatchInstallPolicyRuleFlows(ofPolicyRules []*types.PolicyRule) error {
+	c.replayMutex.RLock()
+	defer c.replayMutex.RUnlock()
+
+	var allFlowMessages []*openflow15.FlowMod
+	var conjunctions []*policyRuleConjunction
+
+	for _, rule := range ofPolicyRules {
+		conj := c.featureNetworkPolicy.calculateActionFlowChangesForRule(rule)
+		c.featureNetworkPolicy.addRuleToConjunctiveMatch(conj, rule)
+		for _, msg := range append(conj.actionFlows, conj.metricFlows...) {
+			allFlowMessages = append(allFlowMessages, msg)
+		}
+		conjunctions = append(conjunctions, conj)
+	}
+
+	for _, ctx := range c.featureNetworkPolicy.globalConjMatchFlowCache {
+		// In theory there must be at least one action but InstallPolicyRuleFlows currently handles the 1 clause case
+		// and we do the same in addRuleToConjunctiveMatch. The check is added only for consistency. Later we should
+		// return error if clients install a rule with only 1 clause, and should remove the extra code for processing it.
+		if len(ctx.actions) > 0 {
+			actions := make([]*conjunctiveAction, 0, len(ctx.actions))
+			for _, action := range ctx.actions {
+				actions = append(actions, action)
+			}
+			ctx.flow = getFlowModMessage(c.featureNetworkPolicy.conjunctiveMatchFlow(ctx.tableID, ctx.matchPairs, ctx.priority, actions), binding.AddMessage)
+			allFlowMessages = append(allFlowMessages, ctx.flow)
+		}
+		if ctx.dropFlow != nil {
+			allFlowMessages = append(allFlowMessages, ctx.dropFlow)
+		}
+	}
+
+	// Send the changed Openflow entries to the OVS bridge.
+	if err := c.ofEntryOperations.AddAll(allFlowMessages); err != nil {
+		// Reset the global conjunctive match flow cache since the OpenFlow bundle, which contains
+		// all the match flows to be installed, was not applied successfully.
+		c.featureNetworkPolicy.globalConjMatchFlowCache = map[string]*conjMatchFlowContext{}
+		return err
+	}
+	// Update conjMatchFlowContexts as the expected status.
+	for _, conj := range conjunctions {
+		// Add the policyRuleConjunction into policyCache
+		c.featureNetworkPolicy.policyCache.Add(conj)
+	}
+	return nil
+}
+
+func (c *client) GetPolicyInfoFromConjunction(ruleID uint32) (bool, *v1beta2.NetworkPolicyReference, string, string, string) {
+	conjunction := c.featureNetworkPolicy.getPolicyRuleConjunction(ruleID)
+	if conjunction == nil || conjunction.npRef == nil {
+		return false, nil, "", "", ""
+	}
+	priorities := conjunction.ActionFlowPriorities()
+	if len(priorities) == 0 {
+		return false, nil, "", "", ""
+	}
+	return true, conjunction.npRef, priorities[0], conjunction.ruleName, conjunction.ruleLogLabel
+}
+
+// UninstallPolicyRuleFlows removes the Openflow entry relevant to the specified NetworkPolicy rule.
+// It also returns a slice of stale ofPriorities used by ClusterNetworkPolicies.
+// UninstallPolicyRuleFlows will do nothing if no Openflow entry for the rule is installed.
+func (c *client) UninstallPolicyRuleFlows(ruleID uint32) ([]string, error) {
+	c.replayMutex.RLock()
+	defer c.replayMutex.RUnlock()
+
+	conj := c.featureNetworkPolicy.getPolicyRuleConjunction(ruleID)
+	if conj == nil {
+		klog.V(2).Infof("policyRuleConjunction with ID %d not found", ruleID)
+		return nil, nil
+	}
+	staleOFPriorities := c.featureNetworkPolicy.getStalePriorities(conj)
+	// Delete action flows from the OVS bridge.
+	if err := c.ofEntryOperations.DeleteAll(append(conj.actionFlows, conj.metricFlows...)); err != nil {
+		return nil, err
+	}
+	c.featureNetworkPolicy.conjMatchFlowLock.Lock()
+	defer c.featureNetworkPolicy.conjMatchFlowLock.Unlock()
+	// Get the conjMatchFlowContext changes.
+	ctxChanges := conj.calculateChangesForRuleDeletion()
+	// Send the changed OpenFlow entries to the OVS bridge and update the conjMatchFlowContext.
+	if err := c.featureNetworkPolicy.applyConjunctiveMatchFlows(ctxChanges); err != nil {
+		return nil, err
+	}
+
+	c.featureNetworkPolicy.policyCache.Delete(conj)
+	return staleOFPriorities, nil
+}
+
+// AddPolicyRuleAddress adds one or multiple addresses to the specified NetworkPolicy rule. If addrType is srcAddress, the
+// addresses are added to PolicyRule.From, else to PolicyRule.To.
+func (c *client) AddPolicyRuleAddress(ruleID uint32, addrType types.AddressType, addresses []types.Address, priority *uint16, enableLogging, isMCNPRule bool) error {
+	c.replayMutex.RLock()
+	defer c.replayMutex.RUnlock()
+
+	conj := c.featureNetworkPolicy.getPolicyRuleConjunction(ruleID)
+	// If policyRuleConjunction doesn't exist in client's policyCache return not found error. It should not happen, since
+	// NetworkPolicyController will guarantee the policyRuleConjunction is created before this method is called. The check
+	// here is for safety.
+	if conj == nil {
+		return newConjunctionNotFound(ruleID)
+	}
+	var clause = conj.getAddressClause(addrType)
+	// Check if the clause is nil or not. The clause is nil if the addrType is an unsupported type.
+	if clause == nil {
+		return fmt.Errorf("no clause is using addrType %d", addrType)
+	}
+
+	c.featureNetworkPolicy.conjMatchFlowLock.Lock()
+	defer c.featureNetworkPolicy.conjMatchFlowLock.Unlock()
+	flowChanges := clause.addAddrFlows(c.featureNetworkPolicy, addrType, addresses, priority, enableLogging, isMCNPRule)
+	return c.featureNetworkPolicy.applyConjunctiveMatchFlows(flowChanges)
+}
+
+// DeletePolicyRuleAddress removes addresses from the specified NetworkPolicy rule. If addrType is srcAddress, the addresses
+// are removed from PolicyRule.From, else from PolicyRule.To.
+func (c *client) DeletePolicyRuleAddress(ruleID uint32, addrType types.AddressType, addresses []types.Address, priority *uint16) error {
+	c.replayMutex.RLock()
+	defer c.replayMutex.RUnlock()
+
+	conj := c.featureNetworkPolicy.getPolicyRuleConjunction(ruleID)
+	// If policyRuleConjunction doesn't exist in client's policyCache return not found error. It should not happen, since
+	// NetworkPolicyController will guarantee the policyRuleConjunction is created before this method is called. The check
+	//	here is for safety.
+	if conj == nil {
+		return newConjunctionNotFound(ruleID)
+	}
+
+	var clause = conj.getAddressClause(addrType)
+	// Check if the clause is nil or not. The clause is nil if the addrType is an unsupported type.
+	if clause == nil {
+		return fmt.Errorf("no clause is using addrType %d", addrType)
+	}
+
+	c.featureNetworkPolicy.conjMatchFlowLock.Lock()
+	defer c.featureNetworkPolicy.conjMatchFlowLock.Unlock()
+	// Remove policyRuleConjunction to actions of conjunctive match using specific address.
+	changes := clause.deleteAddrFlows(addrType, addresses, priority)
+	// Update the Openflow entries on the OVS bridge, and update local cache.
+	return c.featureNetworkPolicy.applyConjunctiveMatchFlows(changes)
+}
+
+func (c *client) GetNetworkPolicyFlowKeys(npName, npNamespace string) []string {
+	flowKeys := []string{}
+	// Hold replayMutex write lock to protect flows from being modified by
+	// NetworkPolicy updates and replayFlows. This is more for logic
+	// cleanliness, as: for now flow updates do not impact the matching string
+	// generation; NetworkPolicy updates do not change policyRuleConjunction.actionFlows;
+	// and last for protection of clause flows, conjMatchFlowLock is good enough.
+	c.replayMutex.Lock()
+	defer c.replayMutex.Unlock()
+
+	for _, conjObj := range c.featureNetworkPolicy.policyCache.List() {
+		conj := conjObj.(*policyRuleConjunction)
+		// If the NetworkPolicyReference in the policyRuleConjunction is nil then that entry in client's
+		// policyCache should be ignored because here we need to dump flows of NetworkPolicy.
+		if conj.npRef == nil {
+			continue
+		}
+		if conj.npRef.Name == npName && conj.npRef.Namespace == npNamespace {
+			// There can be duplicated flows added due to conjunctive matches
+			// shared by multiple policy rules (clauses).
+			flowKeys = append(flowKeys, conj.getAllFlowKeys()...)
+		}
+	}
+	return flowKeys
+}
+
+// ReassignFlowPriorities takes a list of priority updates, and update the actionFlows to replace
+// the old priority with the desired one, for each priority update.
+func (c *client) ReassignFlowPriorities(updates map[uint16]uint16, table uint8) error {
+	addFlows, delFlows, conjFlowUpdates := c.featureNetworkPolicy.calculateFlowUpdates(updates, table)
+	add, update, del := c.featureNetworkPolicy.processFlowUpdates(addFlows, delFlows)
+	// Commit the flows updates calculated.
+	err := c.bridge.AddFlowsInBundle(add, update, del)
+	if err != nil {
+		return err
+	}
+	for conjID, actionUpdates := range conjFlowUpdates {
+		originalConj, _, _ := c.featureNetworkPolicy.policyCache.GetByKey(fmt.Sprint(conjID))
+		conj := originalConj.(*policyRuleConjunction)
+		updatedConj := c.featureNetworkPolicy.updateConjunctionActionFlows(conj, actionUpdates)
+		c.featureNetworkPolicy.updateConjunctionMatchFlows(updatedConj, actionUpdates.newPriority)
+		c.featureNetworkPolicy.policyCache.Update(updatedConj)
+	}
+	return nil
+}
+
+func (c *client) MulticastIngressPodMetrics() map[uint32]*types.RuleMetric {
+	result := map[uint32]*types.RuleMetric{}
+	ingressFlows, _ := c.ovsctlClient.DumpTableFlows(MulticastIngressPodMetricTable.ofTable.GetID())
+	for _, flow := range ingressFlows {
+		if !strings.Contains(flow, metricFlowIdentifier) {
+			continue
+		}
+		flowMap := parseFlowToMap(flow)
+		ofPort, metric := parseMulticastIngressPodFlow(flowMap)
+		result[ofPort] = &metric
+	}
+	return result
+}
+
+func (c *client) MulticastIngressPodMetricsByOFPort(ofPort int32) *types.RuleMetric {
+	table := MulticastIngressPodMetricTable.ofTable.GetID()
+	reg1 := ofPort
+	flow, _ := c.ovsctlClient.DumpMatchedFlow(fmt.Sprintf("table=%d,ip,reg1=%d", table, reg1))
+	if len(flow) == 0 {
+		return &types.RuleMetric{}
+	}
+	flowMap := parseFlowToMap(flow)
+	metric := parseFlowMetric(flowMap)
+	return &metric
+}
+
+func (c *client) MulticastEgressPodMetrics() map[string]*types.RuleMetric {
+	result := map[string]*types.RuleMetric{}
+	ingressFlows, _ := c.ovsctlClient.DumpTableFlows(MulticastEgressPodMetricTable.ofTable.GetID())
+	for _, flow := range ingressFlows {
+		if !strings.Contains(flow, metricFlowIdentifier) {
+			continue
+		}
+		flowMap := parseFlowToMap(flow)
+		srcIP, metric := parseMulticastEgressPodFlow(flowMap)
+		result[srcIP] = &metric
+	}
+	return result
+}
+
+func (c *client) MulticastEgressPodMetricsByIP(ip net.IP) *types.RuleMetric {
+	table := MulticastEgressPodMetricTable.ofTable.GetID()
+	nwSrc := ip.String()
+	flow, _ := c.ovsctlClient.DumpMatchedFlow(fmt.Sprintf("table=%d,ip,nw_src=%s,nw_dst=224.0.0.0/4", table, nwSrc))
+	if len(flow) == 0 {
+		return &types.RuleMetric{}
+	}
+	flowMap := parseFlowToMap(flow)
+	metric := parseFlowMetric(flowMap)
+	return &metric
+}
+
+func (c *client) NetworkPolicyMetrics() map[uint32]*types.RuleMetric {
+	result := map[uint32]*types.RuleMetric{}
+	collectMetricsFromFlows := func(table *Table, getMetricAndID func(flowMap map[string]string) (uint32, types.RuleMetric)) {
+		dumpedFlows, _ := c.ovsctlClient.DumpTableFlows(table.ofTable.GetID())
+		for _, flow := range dumpedFlows {
+			if !strings.Contains(flow, metricFlowIdentifier) {
+				continue
+			}
+			flowMap := parseFlowToMap(flow)
+			ruleID, metric := getMetricAndID(flowMap)
+			if accMetric, ok := result[ruleID]; ok {
+				accMetric.Merge(&metric)
+			} else {
+				result[ruleID] = &metric
+			}
+		}
+	}
+	if c.enableMulticast {
+		// We need to collect NP statistics matching IGMP query messages and egress multicast traffic.
+		collectMetricsFromFlows(MulticastIngressMetricTable, parseMulticastMetricFlow)
+		collectMetricsFromFlows(MulticastEgressMetricTable, parseMulticastMetricFlow)
+	}
+	// We have two flows for each allow rule. One matches 'ct_state=+new'
+	// and counts the number of first packets, which is also the number
+	// of sessions (this is the category why we have 2 flows). The other
+	// matches 'ct_state=-new' and is used to count all subsequent
+	// packets in the session. We need to merge metrics from these 2
+	// flows to get the correct number of total packets.
+	collectMetricsFromFlows(EgressMetricTable, parseMetricFlow)
+	collectMetricsFromFlows(IngressMetricTable, parseMetricFlow)
+	return result
+}
+
+func (c *client) getTableByID(id uint8) binding.Table {
+	obj, exists, _ := c.tableCache.GetByKey(fmt.Sprintf("%d", id))
+	if !exists {
+		return nil
+	}
+	return obj.(*Table).ofTable
+}
+
+// GetFlowTableName returns the flow table name given the table ID. An empty
+// string is returned if the table cannot be found.
+func (c *client) GetFlowTableName(tableID uint8) string {
+	table := c.getTableByID(tableID)
+	if table == nil {
+		return ""
+	}
+	return table.GetName()
+}
+
+// GetFlowTableID does a case insensitive lookup of the table name, and
+// returns the flow table number if the table is found. Otherwise TableIDAll is
+// returned if the table cannot be found.
+func (c *client) GetFlowTableID(tableName string) uint8 {
+	objs, _ := c.tableCache.ByIndex(tableNameIndex, tableName)
+	if len(objs) == 0 {
+		return binding.TableIDAll
+	}
+	return objs[0].(binding.Table).GetID()
+}
+
+func (c *client) GetTableList() []binding.Table {
+	tables := make([]binding.Table, 0)
+	for _, obj := range c.tableCache.List() {
+		t := obj.(*Table).ofTable
+		tables = append(tables, t)
+	}
+	return tables
 }

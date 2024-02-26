@@ -66,16 +66,6 @@ func newFeatureMulticast(cookieAllocator cookie.Allocator, ipProtocols []binding
 	}
 }
 
-func multicastPipelineClassifyFlow(cookieID uint64, pipeline binding.Pipeline) binding.Flow {
-	targetTable := pipeline.GetFirstTable()
-	return PipelineIPClassifierTable.ofTable.BuildFlow(priorityHigh).
-		Cookie(cookieID).
-		MatchProtocol(binding.ProtocolIP).
-		MatchDstIPNet(*types.McastCIDR).
-		Action().ResubmitToTables(targetTable.GetID()).
-		Done()
-}
-
 func (f *featureMulticast) initFlows() []*openflow15.FlowMod {
 	// Install flows to send the IGMP report messages to Antrea Agent.
 	flows := f.igmpPktInFlows()
@@ -250,4 +240,86 @@ func (f *featureMulticast) multicastRemoteReportFlows(groupID binding.GroupIDTyp
 			Action().GotoTable(firstMulticastTable.GetID()).
 			Done(),
 	}
+}
+
+// igmpEgressFlow generates flows to match IGMP report to jump to table MulticastRoutingTable.
+// This is because normal multicast egress rule can match IGMP v1 report, when there is egress
+// rule to block multicast traffic, IGMP v1 report will also be blocked, which is not expected.
+func (f *featureMulticast) igmpEgressFlow() binding.Flow {
+	return MulticastEgressRuleTable.ofTable.BuildFlow(priorityTopAntreaPolicy).
+		Cookie(f.cookieAllocator.Request(f.category).Raw()).
+		MatchProtocol(binding.ProtocolIGMP).
+		MatchRegMark(FromLocalRegMark).
+		Action().GotoStage(stageRouting).
+		Done()
+}
+
+// igmpPktInFlows generates the flow to load CustomReasonIGMPRegMark to mark the IGMP packet in MulticastRoutingTable
+// and sends it to antrea-agent.
+func (f *featureMulticast) igmpPktInFlows() []binding.Flow {
+	var flows []binding.Flow
+	sourceMarks := []*binding.RegMark{FromLocalRegMark}
+	if f.encapEnabled {
+		sourceMarks = append(sourceMarks, FromTunnelRegMark)
+	}
+	for _, m := range sourceMarks {
+		flows = append(flows,
+			// Set a custom category for the IGMP packets, and then send it to antrea-agent. Then antrea-agent can identify
+			// the local multicast group and its members in the meanwhile.
+			// Do not set dst IP address because IGMPv1 report message uses target multicast group as IP destination in
+			// the packet.
+			MulticastRoutingTable.ofTable.BuildFlow(priorityHigh).
+				Cookie(f.cookieAllocator.Request(f.category).Raw()).
+				MatchProtocol(binding.ProtocolIGMP).
+				MatchRegMark(m).
+				Action().SendToController([]byte{uint8(PacketInCategoryIGMP)}, false).
+				Done())
+	}
+	return flows
+}
+
+// localMulticastForwardFlows generates the flow to forward multicast packets with OVS action "normal", and outputs
+// it to Antrea gateway in the meanwhile, so that the packet can be forwarded to local Pods which have joined the Multicast
+// group and to the external receivers. For external multicast packets accessing to the given multicast IP also hits the
+// flow, and the packet is not sent back to Antrea gateway because OVS datapath will drop it when it finds the output
+// port is the same as the input port.
+func (f *featureMulticast) localMulticastForwardFlows(multicastIP net.IP, groupID binding.GroupIDType) []binding.Flow {
+	return []binding.Flow{
+		MulticastRoutingTable.ofTable.BuildFlow(priorityNormal).
+			Cookie(f.cookieAllocator.Request(f.category).Raw()).
+			MatchProtocol(binding.ProtocolIP).
+			MatchDstIP(multicastIP).
+			Action().Group(groupID).
+			Done(),
+	}
+}
+
+// externalMulticastReceiverFlow generates the flow to output multicast packets to Antrea gateway interface (to the host interface
+// and the uplink interface when flexibleIPAM is enabled), so that local Pods can send multicast packets to the external receivers.
+// For the case that one or more local Pods have joined the target multicast group, it is handled by the flows created by
+// function "localMulticastForwardFlows" after local Pods report the IGMP membership.
+// Because there are ingress tables between MulticastRoutingTable and MulticastOutputTable, while currently ingress rules only
+// support IGMP query, it is not necessary to goto the ingress tables for other multicast traffic.
+func (f *featureMulticast) externalMulticastReceiverFlow() binding.Flow {
+	outputPorts := []uint32{f.gatewayPort}
+	if f.flexibleIPAMEnabled {
+		outputPorts = []uint32{f.hostOFPort, f.uplinkPort}
+	}
+	flow := MulticastRoutingTable.ofTable.BuildFlow(priorityLow).
+		Cookie(f.cookieAllocator.Request(f.category).Raw()).
+		MatchProtocol(binding.ProtocolIP)
+	for _, outputPort := range outputPorts {
+		flow = flow.Action().Output(outputPort)
+	}
+	return flow.Done()
+}
+
+func (f *featureMulticast) getRequiredTables() []*Table {
+	tables := []*Table{
+		MulticastRoutingTable,
+		MulticastOutputTable,
+		MulticastEgressPodMetricTable,
+		MulticastIngressPodMetricTable,
+	}
+	return tables
 }

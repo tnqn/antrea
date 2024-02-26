@@ -219,3 +219,15 @@ func (f *featureMulticluster) l3FwdFlowToPodViaTun(
 		Action().GotoTable(L3DecTTLTable.GetID()).
 		Done()
 }
+
+func (f *featureMulticluster) getRequiredTables() []*Table {
+	return []*Table{
+		ClassifierTable,
+		ConntrackTable,
+		L3ForwardingTable,
+		SNATTable,
+		UnSNATTable,
+		SNATMarkTable,
+		OutputTable,
+	}
+}

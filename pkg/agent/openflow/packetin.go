@@ -16,7 +16,6 @@ package openflow
 
 import (
 	"encoding/binary"
-	"errors"
 	"fmt"
 
 	"antrea.io/libOpenflow/openflow15"
@@ -163,17 +162,6 @@ func GetMatchFieldByRegID(matchers *ofctrl.Matchers, regID int) *ofctrl.MatchFie
 		return nil
 	}
 	return &ofctrl.MatchField{MatchField: openflow15.NewRegMatchFieldWithMask(regID, data, mask)}
-}
-
-func GetInfoInReg(regMatch *ofctrl.MatchField, rng *openflow15.NXRange) (uint32, error) {
-	regValue, ok := regMatch.GetValue().(*ofctrl.NXRegister)
-	if !ok {
-		return 0, errors.New("register value cannot be retrieved")
-	}
-	if rng != nil {
-		return ofctrl.GetUint32ValueWithRange(regValue.Data, rng), nil
-	}
-	return regValue.Data, nil
 }
 
 func GetEthernetPacket(pktIn *ofctrl.PacketIn) (*protocol.Ethernet, error) {
