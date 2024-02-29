@@ -2,7 +2,7 @@ SHELL              := /bin/bash
 # go options
 GO                 ?= go
 LDFLAGS            :=
-GOFLAGS            :=
+GOFLAGS            := -trimpath
 # By default, disable cgo for all Go binaries.
 # For binaries meant to be published as release assets or copied to a different host, cgo should
 # always be disabled.

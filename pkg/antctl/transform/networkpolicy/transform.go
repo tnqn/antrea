@@ -28,7 +28,6 @@ import (
 	"antrea.io/antrea/pkg/antctl/transform"
 	"antrea.io/antrea/pkg/antctl/transform/common"
 	cpv1beta "antrea.io/antrea/pkg/apis/controlplane/v1beta2"
-	"antrea.io/antrea/pkg/controller/networkpolicy"
 )
 
 const sortByEffectivePriority = "effectivePriority"
@@ -39,7 +38,7 @@ type Response struct {
 
 // Compute a tierPriority value in between the application tier and the baseline tier,
 // which can be used to sort all policies by tier.
-var effectiveTierPriorityK8sNP = (networkpolicy.DefaultTierPriority + networkpolicy.BaselineTierPriority) / 2
+var effectiveTierPriorityK8sNP = int32(1) // (networkpolicy.DefaultTierPriority + networkpolicy.BaselineTierPriority) / 2
 
 type NPSorter struct {
 	networkPolicies []cpv1beta.NetworkPolicy

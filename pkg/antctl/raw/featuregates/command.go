@@ -77,37 +77,37 @@ func featureGateRequest(cmd *cobra.Command, mode string) error {
 		return err
 	}
 
-	client, err := getRestClient(ctx, kubeconfig, k8sClientset, antreaClientset, mode)
+	_, err = getRestClient(ctx, kubeconfig, k8sClientset, antreaClientset, mode)
 	if err != nil {
 		return err
 	}
 
-	var resp []featuregates.Response
-	if resp, err = getFeatureGatesRequest(client); err != nil {
-		return err
-	}
-	var agentGates []featuregates.Response
-	var agentWindowsGates []featuregates.Response
-	var controllerGates []featuregates.Response
-	for _, v := range resp {
-		switch v.Component {
-		case featuregates.AgentMode:
-			agentGates = append(agentGates, v)
-		case featuregates.AgentWindowsMode:
-			agentWindowsGates = append(agentWindowsGates, v)
-		case featuregates.ControllerMode:
-			controllerGates = append(controllerGates, v)
-		}
-	}
-	if len(agentGates) > 0 {
-		output(agentGates, featuregates.AgentMode, cmd.OutOrStdout())
-	}
-	if len(agentWindowsGates) > 0 {
-		output(agentWindowsGates, featuregates.AgentWindowsMode, cmd.OutOrStdout())
-	}
-	if len(controllerGates) > 0 {
-		output(controllerGates, featuregates.ControllerMode, cmd.OutOrStdout())
-	}
+	//var resp []featuregates.Response
+	//if resp, err = getFeatureGatesRequest(client); err != nil {
+	//	return err
+	//}
+	//var agentGates []featuregates.Response
+	//var agentWindowsGates []featuregates.Response
+	//var controllerGates []featuregates.Response
+	//for _, v := range resp {
+	//	switch v.Component {
+	//	case featuregates.AgentMode:
+	//		agentGates = append(agentGates, v)
+	//	case featuregates.AgentWindowsMode:
+	//		agentWindowsGates = append(agentWindowsGates, v)
+	//	case featuregates.ControllerMode:
+	//		controllerGates = append(controllerGates, v)
+	//	}
+	//}
+	//if len(agentGates) > 0 {
+	//	output(agentGates, featuregates.AgentMode, cmd.OutOrStdout())
+	//}
+	//if len(agentWindowsGates) > 0 {
+	//	output(agentWindowsGates, featuregates.AgentWindowsMode, cmd.OutOrStdout())
+	//}
+	//if len(controllerGates) > 0 {
+	//	output(controllerGates, featuregates.ControllerMode, cmd.OutOrStdout())
+	//}
 	return nil
 }
 

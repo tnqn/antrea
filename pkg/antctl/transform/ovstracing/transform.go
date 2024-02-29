@@ -15,22 +15,20 @@
 package ovstracing
 
 import (
-	"encoding/json"
 	"io"
-
-	"antrea.io/antrea/pkg/agent/apiserver/handlers/ovstracing"
 )
 
 func Transform(reader io.Reader, _ bool, _ map[string]string) (interface{}, error) {
-	b, err := io.ReadAll(reader)
-	if err != nil {
-		return nil, err
-	}
-	resp := new(ovstracing.Response)
-	err = json.Unmarshal(b, resp)
-	if err != nil {
-		return nil, err
-	}
-	// Output the raw bytes of the OVS trace command outputs.
-	return []byte(resp.Result), nil
+	//b, err := io.ReadAll(reader)
+	//if err != nil {
+	//	return nil, err
+	//}
+	return nil, nil
+	//resp := new(ovstracing.Response)
+	//err = json.Unmarshal(b, resp)
+	//if err != nil {
+	//	return nil, err
+	//}
+	//// Output the raw bytes of the OVS trace command outputs.
+	//return []byte(resp.Result), nil
 }

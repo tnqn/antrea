@@ -21,14 +21,12 @@ import (
 	"io"
 	"reflect"
 	"sort"
-	"strconv"
 	"strings"
 	"text/tabwriter"
 
 	"gopkg.in/yaml.v2"
 
 	"antrea.io/antrea/pkg/antctl/transform/common"
-	endpointserver "antrea.io/antrea/pkg/apiserver/handlers/endpoint"
 )
 
 const (
@@ -302,56 +300,56 @@ func respTransformer(obj interface{}) (interface{}, error) {
 // command, utilizing constructTable to implement printing sub tables.
 func TableOutputForQueryEndpoint(obj interface{}, writer io.Writer) error {
 	// construct sections of sub tables for responses (applied, ingressSrc, egressDst)
-	constructSection := func(label string, header [][]string, body [][]string) error {
-		if len(body) == 0 {
-			label += " None"
-		}
-		if err := writeSingleLine(label, writer); err != nil {
-			return err
-		}
-		if len(body) > 0 {
-			rows := append(header, body...)
-			if err := ConstructFormattedTable(rows, true, writer); err != nil {
-				return err
-			}
-		}
-		return writeSingleLine("", writer)
-	}
+	//constructSection := func(label string, header [][]string, body [][]string) error {
+	//	if len(body) == 0 {
+	//		label += " None"
+	//	}
+	//	if err := writeSingleLine(label, writer); err != nil {
+	//		return err
+	//	}
+	//	if len(body) > 0 {
+	//		rows := append(header, body...)
+	//		if err := ConstructFormattedTable(rows, true, writer); err != nil {
+	//			return err
+	//		}
+	//	}
+	//	return writeSingleLine("", writer)
+	//}
 
 	// transform egress and ingress rules to string representation
-	toStringRep := func(effectiveRules []endpointserver.Rule) [][]string {
-		ruleStrings := make([][]string, 0)
-		for _, rule := range effectiveRules {
-			ruleStrings = append(ruleStrings, []string{rule.PolicyRef.Name, rule.PolicyRef.Namespace, strconv.Itoa(rule.RuleIndex), string(rule.PolicyRef.UID)})
-		}
-		return ruleStrings
-	}
+	//toStringRep := func(effectiveRules []endpointserver.Rule) [][]string {
+	//	ruleStrings := make([][]string, 0)
+	//	for _, rule := range effectiveRules {
+	//		ruleStrings = append(ruleStrings, []string{rule.PolicyRef.Name, rule.PolicyRef.Namespace, strconv.Itoa(rule.RuleIndex), string(rule.PolicyRef.UID)})
+	//	}
+	//	return ruleStrings
+	//}
 	// iterate through each endpoint and construct response
-	endpointQueryResponse := obj.(*endpointserver.EndpointQueryResponse)
-	for _, endpoint := range endpointQueryResponse.Endpoints {
-		// indicate each endpoint Namespace/Name
-		if err := writeSingleLine("Endpoint "+endpoint.Namespace+"/"+endpoint.Name, writer); err != nil {
-			return err
-		}
-		// output applied policies to section
-		policies := make([][]string, 0)
-		for _, policy := range endpoint.AppliedPolicies {
-			policyStr := []string{policy.Name, policy.Namespace, string(policy.UID)}
-			policies = append(policies, policyStr)
-		}
-		if err := constructSection("Applied Policies on Endpoint:", [][]string{{"Name", "Namespace", "UID"}}, policies); err != nil {
-			return err
-		}
-		// output rules referencing endpoint as egress destination section
-		egressDst := toStringRep(endpoint.EgressDstRules)
-		if err := constructSection("Egress Rules Referencing Endpoint as Destination:", [][]string{{"Name", "Namespace", "Index", "UID"}}, egressDst); err != nil {
-			return err
-		}
-		// output rules referencing endpoint as ingress source section
-		ingressSrc := toStringRep(endpoint.IngressSrcRules)
-		if err := constructSection("Ingress Rules Referencing Endpoint as Source:", [][]string{{"Name", "Namespace", "Index", "UID"}}, ingressSrc); err != nil {
-			return err
-		}
-	}
+	//endpointQueryResponse := obj.(*endpointserver.EndpointQueryResponse)
+	//for _, endpoint := range endpointQueryResponse.Endpoints {
+	//	// indicate each endpoint Namespace/Name
+	//	if err := writeSingleLine("Endpoint "+endpoint.Namespace+"/"+endpoint.Name, writer); err != nil {
+	//		return err
+	//	}
+	//	// output applied policies to section
+	//	policies := make([][]string, 0)
+	//	for _, policy := range endpoint.AppliedPolicies {
+	//		policyStr := []string{policy.Name, policy.Namespace, string(policy.UID)}
+	//		policies = append(policies, policyStr)
+	//	}
+	//	if err := constructSection("Applied Policies on Endpoint:", [][]string{{"Name", "Namespace", "UID"}}, policies); err != nil {
+	//		return err
+	//	}
+	//	// output rules referencing endpoint as egress destination section
+	//	egressDst := toStringRep(endpoint.EgressDstRules)
+	//	if err := constructSection("Egress Rules Referencing Endpoint as Destination:", [][]string{{"Name", "Namespace", "Index", "UID"}}, egressDst); err != nil {
+	//		return err
+	//	}
+	//	// output rules referencing endpoint as ingress source section
+	//	ingressSrc := toStringRep(endpoint.IngressSrcRules)
+	//	if err := constructSection("Ingress Rules Referencing Endpoint as Source:", [][]string{{"Name", "Namespace", "Index", "UID"}}, ingressSrc); err != nil {
+	//		return err
+	//	}
+	//}
 	return nil
 }

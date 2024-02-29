@@ -28,12 +28,9 @@ import (
 	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
 
-	agentapiserver "antrea.io/antrea/pkg/agent/apiserver"
 	"antrea.io/antrea/pkg/antctl/runtime"
 	"antrea.io/antrea/pkg/apis"
 	"antrea.io/antrea/pkg/apis/crd/v1beta1"
-	controllerapiserver "antrea.io/antrea/pkg/apiserver"
-	cert "antrea.io/antrea/pkg/apiserver/certificate"
 	antrea "antrea.io/antrea/pkg/client/clientset/versioned"
 	antreascheme "antrea.io/antrea/pkg/client/clientset/versioned/scheme"
 	"antrea.io/antrea/pkg/util/ip"
@@ -82,21 +79,21 @@ func SetupLocalKubeconfig(kubeconfig *rest.Config) {
 	kubeconfig.CAData = nil
 	if runtime.Mode == runtime.ModeAgent {
 		kubeconfig.Host = net.JoinHostPort("127.0.0.1", strconv.Itoa(apis.AntreaAgentAPIPort))
-		kubeconfig.BearerTokenFile = agentapiserver.TokenPath
+		//kubeconfig.BearerTokenFile = agentapiserver.TokenPath
 	} else {
 		kubeconfig.Host = net.JoinHostPort("127.0.0.1", strconv.Itoa(apis.AntreaControllerAPIPort))
-		kubeconfig.BearerTokenFile = controllerapiserver.TokenPath
+		//kubeconfig.BearerTokenFile = controllerapiserver.TokenPath
 	}
 }
 
 func GetControllerCACert(ctx context.Context, client kubernetes.Interface) ([]byte, error) {
-	cm, err := client.CoreV1().ConfigMaps(cert.GetCAConfigMapNamespace()).Get(ctx, cert.AntreaCAConfigMapName, metav1.GetOptions{})
+	cm, err := client.CoreV1().ConfigMaps("cert.GetCAConfigMapNamespace()").Get(ctx, "cert.AntreaCAConfigMapName", metav1.GetOptions{})
 	if err != nil {
 		return nil, err
 	}
-	ca, ok := cm.Data[cert.CAConfigMapKey]
+	ca, ok := cm.Data["cert.CAConfigMapKey"]
 	if !ok {
-		return nil, fmt.Errorf("missing key '%s' in ConfigMap", cert.CAConfigMapKey)
+		return nil, fmt.Errorf("missing key '%s' in ConfigMap", "cert.CAConfigMapKey")
 	}
 	return []byte(ca), nil
 }
@@ -208,7 +205,7 @@ func CreateControllerClientCfg(
 			return nil, fmt.Errorf("error when getting cert: %w", err)
 		}
 		cfg.Insecure = false
-		cfg.ServerName = cert.GetAntreaServerNames(cert.AntreaServiceName)[0]
+		//cfg.ServerName = cert.GetAntreaServerNames(cert.AntreaServiceName)[0]
 		cfg.CAData = caCert
 	}
 
