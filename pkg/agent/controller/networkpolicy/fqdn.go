@@ -17,6 +17,7 @@ package networkpolicy
 import (
 	"context"
 	"fmt"
+	utilerrors "k8s.io/apimachinery/pkg/util/errors"
 	"math"
 	"net"
 	"os"
@@ -75,14 +76,56 @@ func (fs *fqdnSelectorItem) matches(fqdn string) bool {
 // expirationTime of the records, which is the DNS response
 // receiving time plus lowest applicable TTL.
 type dnsMeta struct {
-	expirationTime time.Time
-	// Key for responseIPs is the string representation of the IP.
-	// It helps to quickly identify IP address updates when a
-	// new DNS response is received.
-	responseIPs map[string]net.IP
+	//expirationTime time.Time
+	//// Key for responseIPs is the string representation of the IP.
+	//// It helps to quickly identify IP address updates when a
+	//// new DNS response is received.
+	//responseIPs map[string]net.IP
+
+	ipToExpirationTime map[string]time.Time
 }
 
-// subscriber is a entity that subsribes for datapath rule realization
+func newDNSMeta() *dnsMeta {
+	return &dnsMeta{
+		ipToExpirationTime: map[string]time.Time{},
+	}
+}
+
+func (m *dnsMeta) updateRecords(ips []net.IP, ttl uint32) bool {
+	var updated bool
+	now := time.Now()
+	expiredAt := now.Add(time.Duration(ttl) * time.Second)
+	oldIPs := sets.StringKeySet(m.ipToExpirationTime)
+	for _, ip := range ips {
+		ipStr := ip.String()
+		oldIPs.Delete(ipStr)
+		oldExpiredAt, exists := m.ipToExpirationTime[ipStr]
+		if !exists {
+			m.ipToExpirationTime[ipStr] = expiredAt
+			updated = true
+		} else if oldExpiredAt.Before(expiredAt) {
+			m.ipToExpirationTime[ipStr] = expiredAt
+		}
+	}
+	for ip := range oldIPs {
+		expiredAt := m.ipToExpirationTime[ip]
+		if now.After(expiredAt) {
+			delete(m.ipToExpirationTime, ip)
+			updated = true
+		}
+	}
+	return updated
+}
+
+func (m *dnsMeta) getIPs() []net.IP {
+	ips := make([]net.IP, 0, len(m.ipToExpirationTime))
+	for ip := range m.ipToExpirationTime {
+		ips = append(ips, net.ParseIP(ip))
+	}
+	return ips
+}
+
+// subscriber is an entity that subscribes for datapath rule realization
 // results of a specific FQDN. It is needed in case of DNS query interception:
 // the fqdnController needs to make sure that all fqdn rules that DNS
 // query affects is realized, before sending the DNS query back to the
@@ -128,7 +171,7 @@ type fqdnController struct {
 	// A single instance of ruleSyncTracker.
 	ruleSyncTracker *ruleSyncTracker
 	// FQDN names this controller is tracking, with their corresponding dnsMeta.
-	dnsEntryCache map[string]dnsMeta
+	dnsEntryCache map[string]*dnsMeta
 	// FQDN names that needs to be re-queried after their respective TTLs.
 	dnsQueryQueue workqueue.RateLimitingInterface
 	// idAllocator provides interfaces to allocateForRule and release uint32 id.
@@ -160,7 +203,7 @@ func newFQDNController(client openflow.Client, allocator *idAllocator, dnsServer
 		ruleSyncTracker:        &ruleSyncTracker{updateCh: make(chan ruleRealizationUpdate, 1), ruleToSubscribers: map[string][]*subscriber{}, dirtyRules: sets.New[string]()},
 		idAllocator:            allocator,
 		dnsQueryQueue:          workqueue.NewNamedRateLimitingQueue(workqueue.NewItemExponentialFailureRateLimiter(minRetryDelay, maxRetryDelay), "fqdn"),
-		dnsEntryCache:          map[string]dnsMeta{},
+		dnsEntryCache:          map[string]*dnsMeta{},
 		fqdnRuleToSelectedPods: map[string]sets.Set[int32]{},
 		fqdnToSelectorItem:     map[string]map[fqdnSelectorItem]struct{}{},
 		selectorItemToFQDN:     map[fqdnSelectorItem]sets.Set[string]{},
@@ -249,9 +292,7 @@ func (f *fqdnController) getIPsForFQDNSelectors(fqdns []string) []net.IP {
 		}
 		for fqdn := range fqdnsMatched {
 			if dnsMeta, ok := f.dnsEntryCache[fqdn]; ok {
-				for _, ip := range dnsMeta.responseIPs {
-					matchedIPs = append(matchedIPs, ip)
-				}
+				matchedIPs = append(matchedIPs, dnsMeta.getIPs()...)
 			}
 		}
 	}
@@ -272,21 +313,24 @@ func (f *fqdnController) addFQDNSelector(ruleID string, fqdns []string) {
 		fqdnSelectorItem := fqdnToSelectorItem(fqdn)
 		ruleIDs, exists := f.selectorItemToRuleIDs[fqdnSelectorItem]
 		if !exists {
-			// This is a new fqdnSelectorItem. All existing FQDNs in the cache needs to be matched
-			// against this fqdnSelectorItem to update the mapping.
+			// This is a new fqdnSelectorItem.
 			f.selectorItemToRuleIDs[fqdnSelectorItem] = sets.New[string](ruleID)
-			for fqdn := range f.dnsEntryCache {
-				if fqdnSelectorItem.matches(fqdn) {
-					f.setFQDNMatchSelector(fqdn, fqdnSelectorItem)
+			// Existing FQDNs in the cache needs to be matched against this fqdnSelectorItem to update the mapping.
+			if fqdnSelectorItem.matchRegex != "" {
+				// As the selector matches regex, all existing FQDNs can potentially match it.
+				for fqdn := range f.dnsEntryCache {
+					if fqdnSelectorItem.matches(fqdn) {
+						f.setFQDNMatchSelector(fqdn, fqdnSelectorItem)
+					}
 				}
+			} else {
+				// As the selector matches name, only the FQDN of the name matches it.
+				f.setFQDNMatchSelector(fqdnSelectorItem.matchName, fqdnSelectorItem)
+				// Trigger a DNS query immediately for the FQDN.
+				f.dnsQueryQueue.Add(fqdnSelectorItem.matchName)
 			}
 		} else {
 			f.selectorItemToRuleIDs[fqdnSelectorItem] = ruleIDs.Insert(ruleID)
-		}
-		if fqdnSelectorItem.matchName != "" {
-			// Start a DNS query immediately for matchName selectors.
-			f.setFQDNMatchSelector(fqdnSelectorItem.matchName, fqdnSelectorItem)
-			f.dnsQueryQueue.Add(fqdnSelectorItem.matchName)
 		}
 	}
 }
@@ -398,9 +442,8 @@ func (f *fqdnController) deleteRuleSelectedPods(ruleID string) error {
 
 func (f *fqdnController) onDNSResponse(
 	fqdn string,
-	responseIPs map[string]net.IP,
+	responseIPs []net.IP,
 	lowestTTL uint32,
-	lookupTime time.Time,
 	waitCh chan error,
 ) {
 	if len(responseIPs) == 0 {
@@ -410,60 +453,38 @@ func (f *fqdnController) onDNSResponse(
 		}
 		return
 	}
-	// mustCacheResponse is only true if the FQDN is already tracked by this
-	// controller, or it matches at least one fqdnSelectorItem from the policy rules.
-	// addressUpdate is only true if there has been an update in IP addresses
-	// corresponded with the FQDN.
-	mustCacheResponse, addressUpdate := false, false
-	recordTTL := lookupTime.Add(time.Duration(lowestTTL) * time.Second)
 
 	f.fqdnSelectorMutex.Lock()
 	defer f.fqdnSelectorMutex.Unlock()
-	oldDNSMeta, exist := f.dnsEntryCache[fqdn]
-	if exist {
-		mustCacheResponse = true
-		for ipStr := range responseIPs {
-			if _, ok := oldDNSMeta.responseIPs[ipStr]; !ok {
-				addressUpdate = true
-				break
-			}
-		}
-		for oldIPStr, oldIP := range oldDNSMeta.responseIPs {
-			if _, ok := responseIPs[oldIPStr]; !ok {
-				if oldDNSMeta.expirationTime.Before(time.Now()) {
-					// This IP entry has already expired and not seen in the latest DNS response.
-					// It should be removed from the cache.
-					addressUpdate = true
-				} else {
-					// Add the unexpired IP entry to responseIP and update the lowest applicable TTL if needed.
-					responseIPs[oldIPStr] = oldIP
-					if oldDNSMeta.expirationTime.Before(recordTTL) {
-						recordTTL = oldDNSMeta.expirationTime
-					}
-				}
-			}
-		}
-	} else {
+	// We cache a FQDN's records if the FQDN is already tracked by this controller, or it matches at least one
+	// fqdnSelectorItem from the policy rules.
+	dnsEntry, exist := f.dnsEntryCache[fqdn]
+	if !exist {
+		var matched bool
 		for selectorItem := range f.selectorItemToRuleIDs {
 			// Only track the FQDN if there is at least one fqdnSelectorItem matching it.
 			if selectorItem.matches(fqdn) {
-				mustCacheResponse, addressUpdate = true, true
+				matched = true
 				f.setFQDNMatchSelector(fqdn, selectorItem)
 			}
 		}
-	}
-	if mustCacheResponse {
-		f.dnsEntryCache[fqdn] = dnsMeta{
-			expirationTime: recordTTL,
-			responseIPs:    responseIPs,
+		if matched {
+			dnsEntry = newDNSMeta()
+			f.dnsEntryCache[fqdn] = dnsEntry
 		}
-		f.dnsQueryQueue.AddAfter(fqdn, recordTTL.Sub(time.Now()))
+	}
+	// addressUpdate is only true if there has been an update in IP addresses
+	// corresponded with the FQDN.
+	addressUpdate := false
+	if dnsEntry != nil {
+		addressUpdate = dnsEntry.updateRecords(responseIPs, lowestTTL)
+		f.dnsQueryQueue.AddAfter(fqdn, time.Duration(lowestTTL)*time.Second)
 	}
 	f.syncDirtyRules(fqdn, waitCh, addressUpdate)
 }
 
 // onDNSResponseMsg handles a DNS response message intercepted.
-func (f *fqdnController) onDNSResponseMsg(dnsMsg *dns.Msg, lookupTime time.Time, waitCh chan error) {
+func (f *fqdnController) onDNSResponseMsg(dnsMsg *dns.Msg, waitCh chan error) {
 	fqdn, responseIPs, lowestTTL, err := f.parseDNSResponse(dnsMsg)
 	if err != nil {
 		klog.V(2).InfoS("Failed to parse DNS response")
@@ -472,7 +493,7 @@ func (f *fqdnController) onDNSResponseMsg(dnsMsg *dns.Msg, lookupTime time.Time,
 		}
 		return
 	}
-	f.onDNSResponse(fqdn, responseIPs, lowestTTL, lookupTime, waitCh)
+	f.onDNSResponse(fqdn, responseIPs, lowestTTL, waitCh)
 }
 
 // syncDirtyRules triggers rule syncs for rules that are affected by the FQDN of DNS response
@@ -588,25 +609,25 @@ func (f *fqdnController) runRuleSyncTracker(stopCh <-chan struct{}) {
 }
 
 // parseDNSResponse returns the FQDN, IP query result and lowest applicable TTL of a DNS response.
-func (f *fqdnController) parseDNSResponse(msg *dns.Msg) (string, map[string]net.IP, uint32, error) {
+func (f *fqdnController) parseDNSResponse(msg *dns.Msg) (string, []net.IP, uint32, error) {
 	if len(msg.Question) == 0 {
 		return "", nil, 0, fmt.Errorf("invalid DNS message")
 	}
 	fqdn := strings.ToLower(msg.Question[0].Name)
 	lowestTTL := uint32(math.MaxUint32) // a TTL must exist in the RRs
-	responseIPs := map[string]net.IP{}
+	responseIPs := make([]net.IP, 0, len(msg.Answer))
 	for _, ans := range msg.Answer {
 		switch r := ans.(type) {
 		case *dns.A:
 			if f.ipv4Enabled {
-				responseIPs[r.A.String()] = r.A
+				responseIPs = append(responseIPs, r.A)
 				if r.Header().Ttl < lowestTTL {
 					lowestTTL = r.Header().Ttl
 				}
 			}
 		case *dns.AAAA:
 			if f.ipv6Enabled {
-				responseIPs[r.AAAA.String()] = r.AAAA
+				responseIPs = append(responseIPs, r.AAAA)
 				if r.Header().Ttl < lowestTTL {
 					lowestTTL = r.Header().Ttl
 				}
@@ -654,37 +675,23 @@ func (f *fqdnController) lookupIP(ctx context.Context, fqdn string) error {
 	const defaultTTL = 600 // 600 seconds, 10 minutes
 	resolver := net.DefaultResolver
 
-	v4ok, v6ok := true, true
-
-	makeResponseIPs := func(ips []net.IP) map[string]net.IP {
-		responseIPs := make(map[string]net.IP)
-		for _, ip := range ips {
-			responseIPs[ip.String()] = ip
-		}
-		return responseIPs
-	}
-
+	var errs []error
 	if f.ipv4Enabled {
-		lookupTime := time.Now()
 		if ips, err := resolver.LookupIP(ctx, "ip4", fqdn); err == nil {
-			f.onDNSResponse(fqdn, makeResponseIPs(ips), defaultTTL, lookupTime, nil)
+			f.onDNSResponse(fqdn, ips, defaultTTL, nil)
 		} else {
-			v4ok = false
+			errs = append(errs, fmt.Errorf("DNS request failed for IPv4: %w", err))
 		}
 	}
 	if f.ipv6Enabled {
-		lookupTime := time.Now()
 		if ips, err := resolver.LookupIP(ctx, "ip6", fqdn); err == nil {
-			f.onDNSResponse(fqdn, makeResponseIPs(ips), defaultTTL, lookupTime, nil)
+			f.onDNSResponse(fqdn, ips, defaultTTL, nil)
 		} else {
-			v6ok = false
+			errs = append(errs, fmt.Errorf("DNS request failed for IPv6: %w", err))
 		}
 	}
 
-	if !v4ok || !v6ok {
-		return fmt.Errorf("DNS request failed for at least one network (v4 and/or v6)")
-	}
-	return nil
+	return utilerrors.NewAggregate(errs)
 }
 
 // makeDNSRequest makes a proactive query for a FQDN to the coreDNS service.
@@ -700,39 +707,31 @@ func (f *fqdnController) makeDNSRequest(ctx context.Context, fqdn string) error 
 	if fqdn[len(fqdn)-1] != '.' {
 		fqdnToQuery = fqdn + "."
 	}
-	query := func(m *dns.Msg) (*dns.Msg, error) {
+	query := func(qtype uint16) (*dns.Msg, error) {
+		m := &dns.Msg{}
+		m.SetQuestion(fqdnToQuery, qtype)
 		r, _, err := dnsClient.ExchangeContext(ctx, m, f.dnsServerAddr)
 		if err != nil {
-			klog.ErrorS(err, "DNS exchange failed")
 			return nil, err
 		}
 		return r, nil
 	}
-	v4ok, v6ok := true, true
+	var errs []error
 	if f.ipv4Enabled {
-		m := dns.Msg{}
-		m.SetQuestion(fqdnToQuery, dns.TypeA)
-		lookupTime := time.Now()
-		if res, err := query(&m); err == nil {
-			f.onDNSResponseMsg(res, lookupTime, nil)
+		if res, err := query(dns.TypeA); err == nil {
+			f.onDNSResponseMsg(res, nil)
 		} else {
-			v4ok = false
+			errs = append(errs, fmt.Errorf("DNS request failed for IPv4: %w", err))
 		}
 	}
 	if f.ipv6Enabled {
-		m := dns.Msg{}
-		m.SetQuestion(fqdnToQuery, dns.TypeAAAA)
-		lookupTime := time.Now()
-		if res, err := query(&m); err == nil {
-			f.onDNSResponseMsg(res, lookupTime, nil)
+		if res, err := query(dns.TypeAAAA); err == nil {
+			f.onDNSResponseMsg(res, nil)
 		} else {
-			v6ok = false
+			errs = append(errs, fmt.Errorf("DNS request failed for IPv6: %w", err))
 		}
 	}
-	if !v4ok || !v6ok {
-		return fmt.Errorf("DNS request failed for at least one of type A or AAAA queries")
-	}
-	return nil
+	return utilerrors.NewAggregate(errs)
 }
 
 // HandlePacketIn implements openflow.PacketInHandler
@@ -746,7 +745,7 @@ func (f *fqdnController) HandlePacketIn(pktIn *ofctrl.PacketIn) error {
 			waitCh <- nil
 			return
 		}
-		f.onDNSResponseMsg(&dnsMsg, time.Now(), waitCh)
+		f.onDNSResponseMsg(&dnsMsg, waitCh)
 	}
 	handleTCP := func(tcpPkt *protocol.TCP) {
 		dnsData, dataLength, err := binding.GetTCPDNSData(tcpPkt)
@@ -774,7 +773,7 @@ func (f *fqdnController) HandlePacketIn(pktIn *ofctrl.PacketIn) error {
 			waitCh <- nil
 			return
 		}
-		f.onDNSResponseMsg(&dnsMsg, time.Now(), waitCh)
+		f.onDNSResponseMsg(&dnsMsg, waitCh)
 	}
 	go func() {
 		ethernetPkt, err := openflow.GetEthernetPacket(pktIn)
