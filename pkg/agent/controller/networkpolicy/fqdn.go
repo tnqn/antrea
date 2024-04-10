@@ -467,7 +467,7 @@ func (f *fqdnController) onDNSResponse(
 func (f *fqdnController) onDNSResponseMsg(dnsMsg *dns.Msg, waitCh chan error) {
 	fqdn, responseIPs, lowestTTL, err := f.parseDNSResponse(dnsMsg)
 	if err != nil {
-		klog.V(2).InfoS("Failed to parse DNS response")
+		klog.V(2).InfoS("Failed to parse DNS response", "err", err)
 		if waitCh != nil {
 			waitCh <- fmt.Errorf("failed to parse DNS response: %v", err)
 		}
@@ -615,7 +615,7 @@ func (f *fqdnController) parseDNSResponse(msg *dns.Msg) (string, map[string]net.
 		}
 	}
 	if len(responseIPs) > 0 {
-		klog.V(4).InfoS("Received DNS Packet with valid Answer", "IPs", responseIPs, "TTL", lowestTTL)
+		klog.V(4).InfoS("Received DNS Packet with valid Answer", "fqdn", fqdn, "IPs", responseIPs, "TTL", lowestTTL)
 	}
 	if strings.HasSuffix(fqdn, ".") {
 		fqdn = fqdn[:len(fqdn)-1]
