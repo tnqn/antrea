@@ -551,6 +551,7 @@ func run(o *Options) error {
 		egressController, err = egress.NewEgressController(
 			ofClient, k8sClient, antreaClientProvider, crdClient, ifaceStore, routeClient, nodeConfig.Name, nodeConfig.NodeTransportInterfaceName,
 			memberlistCluster, egressInformer, externalIPPoolInformer, nodeInformer, podUpdateChannel, serviceCIDRProvider, o.config.Egress.MaxEgressIPsPerNode,
+			v4Enabled, v6Enabled,
 			features.DefaultFeatureGate.Enabled(features.EgressTrafficShaping),
 			features.DefaultFeatureGate.Enabled(features.EgressSeparateSubnet),
 		)

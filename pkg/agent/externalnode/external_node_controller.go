@@ -64,12 +64,12 @@ const (
 )
 
 var (
-	keyFunc              = cache.MetaNamespaceKeyFunc
-	splitKeyFunc         = cache.SplitMetaNamespaceKey
-	renameInterface      = util.RenameInterface
-	getInterfaceConfig   = util.GetInterfaceConfig
-	getIPNetDeviceFromIP = util.GetIPNetDeviceFromIP
-	hostInterfaceExists  = util.HostInterfaceExists
+	keyFunc             = cache.MetaNamespaceKeyFunc
+	splitKeyFunc        = cache.SplitMetaNamespaceKey
+	renameInterface     = util.RenameInterface
+	getInterfaceConfig  = util.GetInterfaceConfig
+	getInterfaceByIPs   = util.GetInterfaceByIPs
+	hostInterfaceExists = util.HostInterfaceExists
 )
 
 type ExternalNodeController struct {
@@ -630,7 +630,7 @@ func getHostInterfaceName(iface v1alpha1.NetworkInterface) (string, []string, er
 		} else {
 			ipFilter = &ip.DualStackIPs{IPv6: ifIP}
 		}
-		_, _, link, err := getIPNetDeviceFromIP(ipFilter, sets.New[string]())
+		link, err := getInterfaceByIPs(ipFilter)
 		if err == nil {
 			klog.InfoS("Using the interface", "linkName", link.Name, "IP", ipStr)
 			ips.Insert(ipStr)

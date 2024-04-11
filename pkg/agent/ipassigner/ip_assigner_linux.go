@@ -217,41 +217,38 @@ type ipAssigner struct {
 }
 
 // NewIPAssigner returns an *ipAssigner.
-func NewIPAssigner(nodeTransportInterface string, dummyDeviceName string) (IPAssigner, error) {
-	ipv4, ipv6, externalInterface, err := util.GetIPNetDeviceByName(nodeTransportInterface)
-	if err != nil {
-		return nil, fmt.Errorf("get IPNetDevice from name %s error: %+v", nodeTransportInterface, err)
-	}
+func NewIPAssigner(nodeTransportInterface *net.Interface, v4Enabled, v6Enabled bool, dummyDeviceName string) (IPAssigner, error) {
 	a := &ipAssigner{
-		externalInterface: externalInterface,
+		externalInterface: nodeTransportInterface,
 		assignedIPs:       map[string]*crdv1b1.SubnetInfo{},
 		defaultAssignee: &assignee{
-			logicalInterface: externalInterface,
+			logicalInterface: nodeTransportInterface,
 			ips:              sets.New[string](),
 		},
 		vlanAssignees: map[int32]*assignee{},
 	}
-	if ipv4 != nil {
+	var err error
+	if v4Enabled {
 		// For the Egress scenario, the external IPs should always be present on the dummy
 		// interface as they are used as tunnel endpoints. If arp_ignore is set to a value
 		// other than 0, the host will not reply to ARP requests received on the transport
 		// interface when the target IPs are assigned on the dummy interface. So a userspace
 		// ARP responder is needed to handle ARP requests for the Egress IPs.
-		arpIgnore, err := getARPIgnoreForInterface(externalInterface.Name)
+		arpIgnore, err := getARPIgnoreForInterface(nodeTransportInterface.Name)
 		if err != nil {
 			return nil, err
 		}
 		if dummyDeviceName == "" || arpIgnore > 0 {
-			a.defaultAssignee.arpResponder, err = responder.NewARPResponder(externalInterface)
+			a.defaultAssignee.arpResponder, err = responder.NewARPResponder(nodeTransportInterface)
 			if err != nil {
-				return nil, fmt.Errorf("failed to create ARP responder for link %s: %v", externalInterface.Name, err)
+				return nil, fmt.Errorf("failed to create ARP responder for link %s: %v", nodeTransportInterface.Name, err)
 			}
 		}
 	}
-	if ipv6 != nil {
-		a.defaultAssignee.ndpResponder, err = responder.NewNDPResponder(externalInterface)
+	if v6Enabled {
+		a.defaultAssignee.ndpResponder, err = responder.NewNDPResponder(nodeTransportInterface)
 		if err != nil {
-			return nil, fmt.Errorf("failed to create NDP responder for link %s: %v", externalInterface.Name, err)
+			return nil, fmt.Errorf("failed to create NDP responder for link %s: %v", nodeTransportInterface.Name, err)
 		}
 	}
 	if dummyDeviceName != "" {
@@ -260,7 +257,7 @@ func NewIPAssigner(nodeTransportInterface string, dummyDeviceName string) (IPAss
 			return nil, fmt.Errorf("error when ensuring dummy device exists: %v", err)
 		}
 	}
-	vlans, err := getVLANInterfaces(externalInterface.Index)
+	vlans, err := getVLANInterfaces(nodeTransportInterface.Index)
 	if err != nil {
 		return nil, fmt.Errorf("error when getting vlan devices: %w", err)
 	}

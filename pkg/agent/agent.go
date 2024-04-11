@@ -30,7 +30,6 @@ import (
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	apitypes "k8s.io/apimachinery/pkg/types"
-	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/apimachinery/pkg/util/wait"
 	clientset "k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/util/retry"
@@ -79,19 +78,17 @@ const (
 )
 
 var (
-	// getIPNetDeviceFromIP is meant to be overridden for testing.
-	getIPNetDeviceFromIP = util.GetIPNetDeviceFromIP
+	// The following functions are meant to be overridden for testing.
+	getInterfaceByIPs = util.GetInterfaceByIPs
 
-	// getIPNetDeviceByV4CIDR is meant to be overridden for testing.
+	getIPNetsByInterface = util.GetIPNetsByInterface
+
 	getIPNetDeviceByCIDRs = util.GetIPNetDeviceByCIDRs
 
-	// getTransportIPNetDeviceByNameFn is meant to be overridden for testing.
 	getTransportIPNetDeviceByNameFn = getTransportIPNetDeviceByName
 
-	// setLinkUp is meant to be overridden for testing
 	setLinkUp = util.SetLinkUp
 
-	// configureLinkAddresses is meant to be overridden for testing
 	configureLinkAddresses = util.ConfigureLinkAddresses
 )
 
@@ -954,6 +951,7 @@ func (i *Initializer) initK8sNodeLocalConfig(nodeName string) error {
 	if err != nil {
 		return fmt.Errorf("failed to obtain local IP addresses from K8s: %w", err)
 	}
+
 	nodeIPv4Addr, nodeIPv6Addr, nodeInterface, err = i.getNodeInterfaceFromIP(ipAddrs)
 	if err != nil {
 		return fmt.Errorf("failed to get local IPNet device with IP %v: %v", ipAddrs, err)
@@ -1017,6 +1015,7 @@ func (i *Initializer) initK8sNodeLocalConfig(nodeName string) error {
 		Type:                       config.K8sNode,
 		OVSBridge:                  i.ovsBridge,
 		DefaultTunName:             defaultTunInterfaceName,
+		NodeInterface:              nodeInterface,
 		NodeIPv4Addr:               nodeIPv4Addr,
 		NodeIPv6Addr:               nodeIPv6Addr,
 		NodeTransportInterfaceName: transportInterface.Name,
@@ -1281,7 +1280,22 @@ func (i *Initializer) patchNodeAnnotations(nodeName, key string, value interface
 // When searching the Node interface, antrea-gw0 is ignored because it is configured with the same address as Node IP
 // with NetworkPolicyOnly mode on public cloud setup, e.g., AKS.
 func (i *Initializer) getNodeInterfaceFromIP(nodeIPs *utilip.DualStackIPs) (v4IPNet *net.IPNet, v6IPNet *net.IPNet, iface *net.Interface, err error) {
-	return getIPNetDeviceFromIP(nodeIPs, sets.New[string](i.hostGateway))
+	iface, err = getInterfaceByIPs(nodeIPs, i.hostGateway)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	ipAddrs, err := getIPNetsByInterface(iface, nil)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	for _, addr := range ipAddrs {
+		if addr.IP.Equal(nodeIPs.IPv4) {
+			v4IPNet = addr
+		} else if addr.IP.Equal(nodeIPs.IPv6) {
+			v6IPNet = addr
+		}
+	}
+	return v4IPNet, v6IPNet, iface, nil
 }
 
 func (i *Initializer) initNodeLocalConfig() error {

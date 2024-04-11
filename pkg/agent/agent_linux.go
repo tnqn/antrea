@@ -31,15 +31,11 @@ import (
 	"antrea.io/antrea/pkg/agent/interfacestore"
 	"antrea.io/antrea/pkg/agent/util"
 	"antrea.io/antrea/pkg/apis/crd/v1alpha1"
-	utilip "antrea.io/antrea/pkg/util/ip"
 )
 
 var (
 	// getInterfaceByName is meant to be overridden for testing.
 	getInterfaceByName = net.InterfaceByName
-
-	// getAllIPNetsByName is meant to be overridden for testing.
-	getAllIPNetsByName = util.GetAllIPNetsByName
 
 	// setInterfaceARPAnnounce is meant to be overridden for testing.
 	setInterfaceARPAnnounce = util.EnsureARPAnnounceOnInterface
@@ -62,15 +58,13 @@ func (i *Initializer) prepareOVSBridgeForK8sNode() error {
 	}
 	klog.Infof("Preparing OVS bridge for AntreaFlexibleIPAM")
 	// Get uplink network configuration.
-	// TODO(gran): support IPv6
-	_, _, adapter, err := i.getNodeInterfaceFromIP(&utilip.DualStackIPs{IPv4: i.nodeConfig.NodeIPv4Addr.IP})
-	if err != nil {
-		return err
-	}
+	adapter := i.nodeConfig.NodeInterface
 	uplinkNetConfig := i.nodeConfig.UplinkNetConfig
 	uplinkNetConfig.Name = adapter.Name
 	uplinkNetConfig.MAC = adapter.HardwareAddr
-	uplinkIPs, err := getAllIPNetsByName(adapter.Name)
+	uplinkIPs, err := getIPNetsByInterface(adapter, func(addr *net.IPNet) bool {
+		return !addr.IP.IsLinkLocalUnicast()
+	})
 	if err != nil {
 		return fmt.Errorf("failed to get uplink IPs: %w", err)
 	}
@@ -137,7 +131,25 @@ func (i *Initializer) getTunnelPortLocalIP() net.IP {
 }
 
 func getTransportIPNetDeviceByName(ifaceName string, ovsBridgeName string) (*net.IPNet, *net.IPNet, *net.Interface, error) {
-	return util.GetIPNetDeviceByName(ifaceName)
+	device, err := net.InterfaceByName(ifaceName)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	ipNets, err := util.GetIPNetsByInterface(device, func(addr *net.IPNet) bool {
+		return addr.IP.IsGlobalUnicast()
+	})
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	var v4IPNet, v6IPNet *net.IPNet
+	for _, ipNet := range ipNets {
+		if ipNet.IP.To4() != nil && v4IPNet == nil {
+			v4IPNet = ipNet
+		} else if ipNet.IP.To4() == nil && v6IPNet == nil {
+			v6IPNet = ipNet
+		}
+	}
+	return v4IPNet, v6IPNet, device, nil
 }
 
 // saveHostRoutes saves the routes which were configured on the uplink interface

@@ -32,7 +32,6 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/vishvananda/netlink"
 	"golang.org/x/net/nettest"
-	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/apimachinery/pkg/util/wait"
 
 	"antrea.io/antrea/pkg/agent/config"
@@ -54,11 +53,12 @@ func ExecOutputTrim(cmd string) (string, error) {
 
 var (
 	_, podCIDR, _            = net.ParseCIDR("10.10.10.0/24")
-	nodeIPv4, _, nodeIntf, _ = util.GetIPNetDeviceFromIP(func() *utilip.DualStackIPs {
+	nodeIPv4, _, nodeIntf, _ = util.GetInterfaceByIPs(func() *utilip.DualStackIPs {
 		conn, _ := net.Dial("udp", "8.8.8.8:80")
 		defer conn.Close()
 		return &utilip.DualStackIPs{IPv4: conn.LocalAddr().(*net.UDPAddr).IP}
-	}(), sets.New[string]())
+	}())
+
 	nodeLink, _  = netlink.LinkByName(nodeIntf.Name)
 	localPeerIP  = ip.NextIP(nodeIPv4.IP)
 	remotePeerIP = net.ParseIP("50.50.50.1")

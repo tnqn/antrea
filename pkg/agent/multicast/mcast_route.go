@@ -224,9 +224,20 @@ func inboundGroupIndexFunc(obj interface{}) ([]string, error) {
 func (c *MRouteClient) setMulticastInterfaces() {
 	multicastInterfaceConfigs := make([]multicastInterfaceConfig, 0, len(c.multicastInterfaces))
 	for _, ifaceName := range c.multicastInterfaces {
-		ipv4Addr, ipv6Addr, iface, err := util.GetIPNetDeviceByName(ifaceName)
+		iface, err := net.InterfaceByName(ifaceName)
 		if err != nil {
-			klog.ErrorS(err, "Failed to get local IPNet device", "interface", ifaceName)
+			klog.ErrorS(err, "Failed to get network interface", "interface", ifaceName)
+			continue
+		}
+		ipv4Addrs, err := util.GetIPNetsByInterface(iface, func(addr *net.IPNet) bool {
+			return addr.IP.IsGlobalUnicast() && addr.IP.To4() != nil
+		})
+		if err != nil {
+			klog.ErrorS(err, "Failed to get IPNets of the interface", "interface", ifaceName)
+			continue
+		}
+		if len(ipv4Addrs) == 0 {
+			klog.InfoS("Found no IPv4 addresses on the interface, ignoring it", "interface", ifaceName)
 			continue
 		}
 		if !strings.Contains(iface.Flags.String(), MulticastFlag) {
@@ -235,8 +246,7 @@ func (c *MRouteClient) setMulticastInterfaces() {
 		}
 		config := multicastInterfaceConfig{
 			Name:     iface.Name,
-			IPv4Addr: ipv4Addr,
-			IPv6Addr: ipv6Addr,
+			IPv4Addr: ipv4Addrs[0],
 		}
 		multicastInterfaceConfigs = append(multicastInterfaceConfigs, config)
 	}
@@ -265,7 +275,6 @@ type parsedIGMPMsg struct {
 type multicastInterfaceConfig struct {
 	Name     string
 	IPv4Addr *net.IPNet
-	IPv6Addr *net.IPNet
 }
 
 type RouteInterface interface {

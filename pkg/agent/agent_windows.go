@@ -77,7 +77,7 @@ func (i *Initializer) prepareHNSNetworkAndOVSExtension() error {
 	// Get uplink network configuration. The uplink interface is the one used for transporting Pod traffic across Nodes.
 	// Use the interface specified with "transportInterface" in the configuration if configured, otherwise the interface
 	// configured with NodeIP is used as uplink.
-	_, _, adapter, err := i.getNodeInterfaceFromIP(&utilip.DualStackIPs{IPv4: i.nodeConfig.NodeTransportIPv4Addr.IP})
+	adapter, err := i.getNodeInterfaceFromIP(&utilip.DualStackIPs{IPv4: i.nodeConfig.NodeTransportIPv4Addr.IP})
 	if err != nil {
 		return err
 	}
@@ -440,7 +440,7 @@ func (i *Initializer) setVMNodeConfig(en *v1alpha1.ExternalNode, nodeName string
 		} else {
 			ipFilter = &utilip.DualStackIPs{IPv6: epIP}
 		}
-		_, _, uplinkInterface, err = getIPNetDeviceFromIP(ipFilter, nil)
+		uplinkInterface, err = getInterfaceByIPs(ipFilter, nil)
 		if err != nil {
 			klog.InfoS("Unable to get net device by IP", "IP", addr)
 		} else {

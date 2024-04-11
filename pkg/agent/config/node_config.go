@@ -160,6 +160,8 @@ type NodeConfig struct {
 	// The CIDR block from where to allocate IPv6 address to Pod.
 	// It's nil for the networkPolicyOnly trafficEncapMode which doesn't do IPAM.
 	PodIPv6CIDR *net.IPNet
+	// The name of the Node's interface that has IP addresses used in Kubernetes.
+	NodeInterface *net.Interface
 	// The Node's IPv4 address used in Kubernetes. It has the network mask information.
 	NodeIPv4Addr *net.IPNet
 	// The Node's IPv6 address used in Kubernetes. It has the network mask information.
@@ -167,6 +169,7 @@ type NodeConfig struct {
 	// The name of the Node's transport interface. The transport interface defaults to the interface that has the K8s
 	// Node IP, and can be overridden by the configuration parameters TransportInterface and TransportInterfaceCIDRs.
 	NodeTransportInterfaceName string
+	NodeTransportInterface     *net.Interface
 	// The IPv4 address on the Node's transport interface. It is used for tunneling or routing the Pod traffic across Nodes.
 	NodeTransportIPv4Addr *net.IPNet
 	// The IPv6 address on the Node's transport interface. It is used for tunneling or routing the Pod traffic across Nodes.

@@ -135,53 +135,62 @@ func listenUnix(address string) (net.Listener, error) {
 	return net.Listen("unix", address)
 }
 
-// GetIPNetDeviceFromIP returns local IPs/masks and associated device from IP, and ignores the interfaces which have
-// names in the ignoredInterfaces.
-func GetIPNetDeviceFromIP(localIPs *ip.DualStackIPs, ignoredInterfaces sets.Set[string]) (v4IPNet *net.IPNet, v6IPNet *net.IPNet, iface *net.Interface, err error) {
+func GetInterfaceByIPs(ips *ip.DualStackIPs, ignoredInterfaces ...string) (*net.Interface, error) {
 	linkList, err := netInterfaces()
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, err
 	}
 
-	// localIPs includes at most one IPv4 address and one IPv6 address. For each device in linkList, all its addresses
-	// are compared with IPs in localIPs. If found, the iface is set to the device and v4IPNet, v6IPNet are set to
-	// the matching addresses.
-	saveIface := func(current *net.Interface) error {
-		if iface != nil && iface.Index != current.Index {
-			return fmt.Errorf("IPs of localIPs should be on the same device")
-		}
-		iface = current
-		return nil
-	}
+	ignoredNameSet := sets.NewString(ignoredInterfaces...)
 	for i := range linkList {
 		link := linkList[i]
-		if ignoredInterfaces.Has(link.Name) {
+		if ignoredNameSet.Has(link.Name) {
 			continue
 		}
 		addrList, err := netInterfaceAddrs(&link)
 		if err != nil {
-			continue
+			return nil, err
 		}
+		var v4Found, v6Found bool
 		for _, addr := range addrList {
 			if ipNet, ok := addr.(*net.IPNet); ok {
-				if ipNet.IP.Equal(localIPs.IPv4) {
-					if err := saveIface(&link); err != nil {
-						return nil, nil, nil, err
-					}
-					v4IPNet = ipNet
-				} else if ipNet.IP.Equal(localIPs.IPv6) {
-					if err := saveIface(&link); err != nil {
-						return nil, nil, nil, err
-					}
-					v6IPNet = ipNet
+				if ipNet.IP.Equal(ips.IPv4) {
+					v4Found = true
+				} else if ipNet.IP.Equal(ips.IPv6) {
+					v6Found = true
 				}
+			}
+			if (ips.IPv4 == nil || v4Found) && (ips.IPv6 == nil || v6Found) {
+				return &link, nil
 			}
 		}
 	}
-	if iface == nil {
-		return nil, nil, nil, fmt.Errorf("unable to find local IPs and device")
+	return nil, fmt.Errorf("unable to find a network interface with provided IPs: %v", ips)
+}
+
+func GetIPNetsByInterface(iface *net.Interface, filter func(addr *net.IPNet) bool) ([]*net.IPNet, error) {
+	addrList, err := netInterfaceAddrs(iface)
+	if err != nil {
+		return nil, err
 	}
-	return v4IPNet, v6IPNet, iface, nil
+	var ipNets []*net.IPNet
+	for _, addr := range addrList {
+		if ipNet, ok := addr.(*net.IPNet); ok {
+			if filter == nil || filter(ipNet) {
+				ipNets = append(ipNets, ipNet)
+			}
+		}
+	}
+	klog.InfoS("Found IPs on interface", "IPs", ipNets, "interface", iface.Name)
+	return ipNets, nil
+}
+
+func GetIPNetsByName(name string, filter func(addr *net.IPNet) bool) ([]*net.IPNet, error) {
+	iface, err := netInterfaceByName(name)
+	if err != nil {
+		return nil, err
+	}
+	return GetIPNetsByInterface(iface, filter)
 }
 
 func GetIPNetDeviceByName(ifaceName string) (v4IPNet *net.IPNet, v6IPNet *net.IPNet, link *net.Interface, err error) {
@@ -261,25 +270,6 @@ func GetIPNetDeviceByCIDRs(cidrsList []string) (v4IPNet, v6IPNet *net.IPNet, lin
 		}
 	}
 	return nil, nil, nil, fmt.Errorf("unable to find local IP and device")
-}
-
-func GetAllIPNetsByName(ifaceName string) ([]*net.IPNet, error) {
-	ips := []*net.IPNet{}
-	adapter, err := netInterfaceByName(ifaceName)
-	if err != nil {
-		return nil, err
-	}
-	addrs, _ := netInterfaceAddrs(adapter)
-	for _, addr := range addrs {
-		if ip, ipNet, err := net.ParseCIDR(addr.String()); err != nil {
-			klog.Warningf("Unable to parse addr %+v, err=%+v", addr, err)
-		} else if !ip.IsLinkLocalUnicast() {
-			ipNet.IP = ip
-			ips = append(ips, ipNet)
-		}
-	}
-	klog.InfoS("Found IPs on interface", "IPs", ips, "interface", ifaceName)
-	return ips, nil
 }
 
 func GetIPv4Addr(ips []net.IP) net.IP {

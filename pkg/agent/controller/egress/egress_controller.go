@@ -215,7 +215,7 @@ func NewEgressController(
 	ifaceStore interfacestore.InterfaceStore,
 	routeClient route.Interface,
 	nodeName string,
-	nodeTransportInterface string,
+	nodeTransportInterface *net.Interface,
 	cluster memberlist.Interface,
 	egressInformer crdinformers.EgressInformer,
 	externalIPPoolInformer crdinformers.ExternalIPPoolInformer,
@@ -223,6 +223,8 @@ func NewEgressController(
 	podUpdateSubscriber channel.Subscriber,
 	serviceCIDRInterface servicecidr.Interface,
 	maxEgressIPsPerNode int,
+	v4Enabled bool,
+	v6Enabled bool,
 	trafficShapingEnabled bool,
 	supportSeparateSubnet bool,
 ) (*EgressController, error) {
@@ -280,7 +282,7 @@ func NewEgressController(
 			resyncPeriod,
 		)
 	}
-	ipAssigner, err := newIPAssigner(nodeTransportInterface, egressDummyDevice)
+	ipAssigner, err := newIPAssigner(nodeTransportInterface, v4Enabled, v6Enabled, egressDummyDevice)
 	if err != nil {
 		return nil, fmt.Errorf("initializing egressIP assigner failed: %v", err)
 	}
