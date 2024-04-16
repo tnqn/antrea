@@ -221,7 +221,11 @@ func (c *ExternalIPPoolController) createOrUpdateIPAllocator(ipPool *antreacrds.
 				// Don't use the IPv4 network's broadcast address.
 				var reservedIPs []net.IP
 				if utilnet.IsIPv4CIDR(ipNet) {
-					reservedIPs = append(reservedIPs, iputil.GetLocalBroadcastIP(ipNet))
+					prefixLength, _ := ipNet.Mask.Size()
+					// Networks with 31-bit and 32-bit prefix length have no broadcast address.
+					if prefixLength <= 30 {
+						reservedIPs = append(reservedIPs, iputil.GetLocalBroadcastIP(ipNet))
+					}
 				}
 				return ipallocator.NewCIDRAllocator(ipNet, reservedIPs)
 			} else {
