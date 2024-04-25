@@ -27,9 +27,9 @@ func init() {
 	RegisterTest("pod-to-pod-internode-connectivity", &PodToPodInterNodeConnectivityTest{})
 }
 
-func (t *PodToPodInterNodeConnectivityTest) Run(ctx context.Context, testContext *testContext) error {
+func (t *PodToPodInterNodeConnectivityTest) Run(ctx context.Context, testContext *testContext) (error, bool) {
 	if testContext.echoOtherNodePod == nil {
-		return fmt.Errorf("Skipping Inter-Node test because multiple Nodes are not available")
+		return fmt.Errorf("Inter-Node test requires multiple Nodes"), true
 	}
 	for _, clientPod := range testContext.clientPods {
 		srcPod := testContext.namespace + "/" + clientPod.Name
@@ -39,10 +39,10 @@ func (t *PodToPodInterNodeConnectivityTest) Run(ctx context.Context, testContext
 			testContext.Log("Validating from Pod %s to Pod %s at IP %s...", srcPod, dstPod, echoIP)
 			_, _, err := check.ExecInPod(ctx, testContext.client, testContext.config, testContext.namespace, clientPod.Name, "", agnhostConnectCommand(echoIP, "80"))
 			if err != nil {
-				return fmt.Errorf("client Pod %s was not able to communicate with echo Pod %s (%s): %w", clientPod.Name, testContext.echoOtherNodePod.Name, echoIP, err)
+				return fmt.Errorf("client Pod %s was not able to communicate with echo Pod %s (%s): %w", clientPod.Name, testContext.echoOtherNodePod.Name, echoIP, err), false
 			}
 			testContext.Log("client Pod %s was able to communicate with echo Pod %s (%s)", clientPod.Name, testContext.echoOtherNodePod.Name, echoIP)
 		}
 	}
-	return nil
+	return nil, false
 }

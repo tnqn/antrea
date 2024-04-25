@@ -22,6 +22,7 @@ require (
 	github.com/containernetworking/plugins v1.1.1
 	github.com/coreos/go-iptables v0.7.0
 	github.com/davecgh/go-spew v1.1.1
+	github.com/fatih/color v1.15.0
 	github.com/fsnotify/fsnotify v1.7.0
 	github.com/gammazero/deque v0.1.2
 	github.com/go-logr/logr v1.4.1
@@ -126,7 +127,6 @@ require (
 	github.com/evanphx/json-patch v5.6.0+incompatible // indirect
 	github.com/evanphx/json-patch/v5 v5.6.0 // indirect
 	github.com/exponent-io/jsonpath v0.0.0-20151013193312-d6023ce2651d // indirect
-	github.com/fatih/color v1.15.0 // indirect
 	github.com/felixge/httpsnoop v1.0.3 // indirect
 	github.com/fvbommel/sortorder v1.1.0 // indirect
 	github.com/go-errors/errors v1.4.2 // indirect

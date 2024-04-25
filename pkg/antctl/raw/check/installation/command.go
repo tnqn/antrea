@@ -22,6 +22,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/fatih/color"
 	"github.com/spf13/cobra"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -69,7 +70,7 @@ const (
 )
 
 type Test interface {
-	Run(ctx context.Context, testContext *testContext) error
+	Run(ctx context.Context, testContext *testContext) (error, bool)
 }
 
 var testsRegistry = make(map[string]Test)
@@ -99,16 +100,25 @@ func Run(o *options) error {
 	if err := testContext.setup(ctx); err != nil {
 		return err
 	}
+	var numSuccess, numFailure, numSkipped int
 	for name, test := range testsRegistry {
 		testContext.Header("Running test: %s", name)
-		if err := test.Run(ctx, testContext); err != nil {
-			testContext.Header("Test %s failed: %s", name, err)
+		if err, skipped := test.Run(ctx, testContext); skipped {
+			testContext.Warning("Test %s was skipped: %v", name, err)
+			numSkipped++
+		} else if err != nil {
+			testContext.Fail("Test %s failed: %v", name, err)
+			numFailure++
 		} else {
-			testContext.Header("Test %s passed", name)
+			testContext.Success("Test %s passed", name)
+			numSuccess++
 		}
 	}
-	testContext.Log("Test finished")
+	testContext.Log("Test finished: %v tests succeeded, %v tests failed, %v tests were skipped", numSuccess, numFailure, numSkipped)
 	testContext.teardown(ctx)
+	if numFailure > 0 {
+		return fmt.Errorf("%v/%v tests failed", numFailure, len(testsRegistry))
+	}
 	return nil
 }
 
@@ -395,6 +405,18 @@ func (t *testContext) waitForDeploymentsReady(ctx context.Context, interval, tim
 
 func (t *testContext) Log(format string, a ...interface{}) {
 	fmt.Fprintf(os.Stdout, fmt.Sprintf("[%s] ", t.clusterName)+format+"\n", a...)
+}
+
+func (t *testContext) Success(format string, a ...interface{}) {
+	fmt.Fprintf(os.Stdout, fmt.Sprintf("[%s] ", t.clusterName)+color.GreenString(format, a...)+"\n")
+}
+
+func (t *testContext) Fail(format string, a ...interface{}) {
+	fmt.Fprintf(os.Stdout, fmt.Sprintf("[%s] ", t.clusterName)+color.RedString(format, a...)+"\n")
+}
+
+func (t *testContext) Warning(format string, a ...interface{}) {
+	fmt.Fprintf(os.Stdout, fmt.Sprintf("[%s] ", t.clusterName)+color.YellowString(format, a...)+"\n")
 }
 
 func (t *testContext) Header(format string, a ...interface{}) {
