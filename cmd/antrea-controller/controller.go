@@ -17,6 +17,8 @@ package main
 import (
 	"context"
 	"fmt"
+	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/meta"
 	"net"
 	"os"
 	"path"
@@ -130,7 +132,20 @@ func run(o *Options) error {
 		return fmt.Errorf("error creating K8s clients: %v", err)
 	}
 	k8s.OverrideKubeAPIServer(o.config.KubeAPIServerOverride)
-	informerFactory := informers.NewSharedInformerFactory(client, informerDefaultResync)
+
+	// Informer transform to trim ManagedFields for memory efficiency.
+	trim := func(obj interface{}) (interface{}, error) {
+		if accessor, err := meta.Accessor(obj); err == nil {
+			accessor.SetManagedFields(nil)
+		}
+		if pod, ok := obj.(*corev1.Pod); ok {
+			pod.Labels["aaa"] = "bbb"
+			pod.Spec.Containers = nil
+		}
+		return obj, nil
+	}
+
+	informerFactory := informers.NewSharedInformerFactoryWithOptions(client, informerDefaultResync, informers.WithTransform(trim))
 	crdInformerFactory := crdinformers.NewSharedInformerFactory(crdClient, informerDefaultResync)
 	policyInformerFactory := policyv1a1informers.NewSharedInformerFactory(policyClient, informerDefaultResync)
 	podInformer := informerFactory.Core().V1().Pods()
