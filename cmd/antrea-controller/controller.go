@@ -20,6 +20,7 @@ import (
 	"net"
 	"os"
 	"path"
+	"runtime"
 	"time"
 
 	apiextensionclientset "k8s.io/apiextensions-apiserver/pkg/client/clientset/clientset"
@@ -131,10 +132,13 @@ func run(o *Options) error {
 		return fmt.Errorf("error creating K8s clients: %v", err)
 	}
 	k8s.OverrideKubeAPIServer(o.config.KubeAPIServerOverride)
-	informerFactory := informers.NewSharedInformerFactoryWithOptions(client, informerDefaultResync, informers.WithTransform(k8s.NewTrimmer(k8s.TrimPod)))
+	informerFactory := informers.NewSharedInformerFactoryWithOptions(client, informerDefaultResync, informers.WithTransform(k8s.NewTrimmer()))
+	podInformerFactory := informers.NewSharedInformerFactoryWithOptions(client, informerDefaultResync, informers.WithTweakListOptions(func(options *metav1.ListOptions) {
+		//options.FieldSelector = fields.OneTermEqualSelector("metadata.name", "abc").String()
+	}), informers.WithTransform(nil))
 	crdInformerFactory := crdinformers.NewSharedInformerFactoryWithOptions(crdClient, informerDefaultResync, crdinformers.WithTransform(k8s.NewTrimmer()))
 	policyInformerFactory := policyv1a1informers.NewSharedInformerFactory(policyClient, informerDefaultResync)
-	podInformer := informerFactory.Core().V1().Pods()
+	podInformer := podInformerFactory.Core().V1().Pods()
 	namespaceInformer := informerFactory.Core().V1().Namespaces()
 	serviceInformer := informerFactory.Core().V1().Services()
 	networkPolicyInformer := informerFactory.Networking().V1().NetworkPolicies()
@@ -336,6 +340,7 @@ func run(o *Options) error {
 
 	informerFactory.Start(stopCh)
 	crdInformerFactory.Start(stopCh)
+	podInformerFactory.Start(stopCh)
 	if features.DefaultFeatureGate.Enabled(features.AdminNetworkPolicy) {
 		// TODO(yang): When the AdminNetworkPolicy graduates to Beta, we need a better mechanism in Antrea controller
 		//  so that 1. the policyInformerFactory is only started if the AdminNetworkPolicy CRD types are installed in
@@ -432,6 +437,20 @@ func run(o *Options) error {
 		}
 		go csrSigningController.Run(stopCh)
 	}
+
+	go func() {
+		ticker := time.NewTicker(10 * time.Second)
+		for {
+			select {
+			case <-ticker.C:
+				klog.InfoS("GCing")
+				runtime.GC()
+			case <-stopCh:
+				return
+			}
+		}
+
+	}()
 
 	<-stopCh
 	klog.Info("Stopping Antrea controller")
