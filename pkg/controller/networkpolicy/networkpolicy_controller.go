@@ -502,6 +502,20 @@ func NewNetworkPolicyController(kubeClient clientset.Interface,
 		n.grpInformer = grpInformer
 		n.grpLister = grpInformer.Lister()
 		n.grpListerSynced = grpInformer.Informer().HasSynced
+		n.tierInformer.Informer().AddEventHandlerWithResyncPeriod(
+			cache.ResourceEventHandlerFuncs{
+				AddFunc: func(obj interface{}) {
+					klog.InfoS("Processing Tier ADD event", "tier", obj)
+				},
+				UpdateFunc: func(_, obj interface{}) {
+					klog.InfoS("Processing Tier UPDATE event", "tier", obj)
+				},
+				DeleteFunc: func(obj interface{}) {
+					klog.InfoS("Processing Tier DELETE event", "tier", obj)
+				},
+			},
+			resyncPeriod,
+		)
 		// Add handlers for Namespace events.
 		n.namespaceInformer.Informer().AddEventHandlerWithResyncPeriod(
 			cache.ResourceEventHandlerFuncs{
