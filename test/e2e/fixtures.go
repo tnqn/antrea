@@ -339,7 +339,7 @@ func exportLogs(tb testing.TB, data *TestData, logsSubDir string, writeNodeLogs 
 	}
 	// if test was successful and --logs-export-on-success was not provided, we do not export
 	// any logs.
-	if !tb.Failed() && !testOptions.logsExportOnSuccess {
+	if !tb.Failed() && !testOptions.logsExportOnSuccess && logsSubDir != "afterCreateInvalidTier" {
 		return
 	}
 	const timeFormat = "Jan02-15-04-05"
