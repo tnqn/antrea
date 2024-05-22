@@ -4487,7 +4487,10 @@ func TestAntreaPolicy(t *testing.T) {
 		// For creation.
 		t.Run("Case=CreateInvalidACNP", func(t *testing.T) { testCreateValidationInvalidACNP(t) })
 		t.Run("Case=CreateInvalidANNP", func(t *testing.T) { testCreateValidationInvalidANNP(t) })
-		t.Run("Case=CreateInvalidTier", func(t *testing.T) { testCreateValidationInvalidTier(t) })
+		t.Run("Case=CreateInvalidTier", func(t *testing.T) {
+			defer exportLogs(t, data, "afterCreateInvalidTier", true)
+			testCreateValidationInvalidTier(t)
+		})
 		t.Run("Case=CreateInvalidClusterGroup", func(t *testing.T) { testCreateValidationInvalidCG(t) })
 		t.Run("Case=CreateInvalidGroup", func(t *testing.T) { testCreateValidationInvalidGroup(t) })
 
