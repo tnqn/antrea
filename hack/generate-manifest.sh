@@ -369,7 +369,7 @@ if [ "$MODE" == "dev" ]; then
     fi
 
     if $VERBOSE_LOG; then
-        HELM_VALUES+=("logVerbosity=4")
+        HELM_VALUES+=("logVerbosity=5")
     fi
 
     if $ON_DELETE; then
