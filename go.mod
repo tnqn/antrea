@@ -84,7 +84,7 @@ require (
 	sigs.k8s.io/yaml v1.3.0
 )
 
-replace github.com/vishvananda/netlink v1.2.1-beta.2 => github.com/vishvananda/netlink v1.2.1-beta.2.0.20240301210615-7f562ed5761f
+replace github.com/vishvananda/netlink v1.2.1-beta.2 => github.com/tnqn/netlink v1.1.1-0.20240523104823-05294bad52f3
 
 require (
 	github.com/Azure/go-ansiterm v0.0.0-20210617225240-d185dfc1b5a1 // indirect
