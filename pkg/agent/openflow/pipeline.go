@@ -1281,7 +1281,7 @@ func (f *featurePodConnectivity) l3FwdFlowRouteToGW() []binding.Flow {
 			MatchProtocol(ipProtocol).
 			Action().SetDstMAC(f.nodeConfig.GatewayConfig.MAC).
 			Action().LoadRegMark(ToGatewayRegMark).
-			Action().GotoTable(L3DecTTLTable.GetID()).
+			Action().GotoTable(EgressMarkTable.GetID()).
 			Done(),
 		)
 	}

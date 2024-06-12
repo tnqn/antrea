@@ -500,10 +500,10 @@ func (o *Options) validateEgressConfig(encapMode config.TrafficEncapModeType) er
 	if !features.DefaultFeatureGate.Enabled(features.Egress) {
 		return nil
 	}
-	if encapMode != config.TrafficEncapModeEncap {
-		klog.InfoS("The Egress feature gate is enabled, but it won't work because it is only applicable to the encap mode")
-		return nil
-	}
+	//if encapMode != config.TrafficEncapModeEncap {
+	//	klog.InfoS("The Egress feature gate is enabled, but it won't work because it is only applicable to the encap mode")
+	//	return nil
+	//}
 	for _, cidr := range o.config.Egress.ExceptCIDRs {
 		_, _, err := net.ParseCIDR(cidr)
 		if err != nil {

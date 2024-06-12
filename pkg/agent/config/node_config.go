@@ -275,6 +275,27 @@ func (nc *NetworkConfig) NeedsTunnelToPeer(peerIP net.IP, localIP *net.IPNet) bo
 	return nc.TrafficEncapMode == TrafficEncapModeEncap || (nc.TrafficEncapMode == TrafficEncapModeHybrid && !localIP.Contains(peerIP))
 }
 
+/*
+sysctl -w net.ipv4.conf.antrea-gw0.rp_filter=2
+
+# Note that calico always insert its rule to the 1st line.
+iptables -t mangle -I PREROUTING -i antrea-gw0 -m mark --mark 0x1/0xff -j CONNMARK --save-mark
+iptables -t mangle -I PREROUTING ! -i antrea-gw0 -j CONNMARK --restore-mark
+iptables -t nat -I POSTROUTING -j ANTREA-POSTROUTING
+tcpdump -i antrea-gw0 -n icmp
+
+# Cleanup
+iptables -t mangle -D PREROUTING -i antrea-gw0 -m mark --mark 0x1/0xff -j CONNMARK --save-mark
+iptables -t mangle -D PREROUTING ! -i antrea-gw0 -j CONNMARK --restore-mark
+iptables -t nat -D POSTROUTING -j ANTREA-POSTROUTING
+
+# Avoid asymmetric path
+ip route add 10.244.110.128/26 via 172.18.0.4 dev antrea-gw0 onlink table 200
+ip rule add fwmark 0x1 table 200
+
+# Route the reply back, may use learning rule here.
+ovs-ofctl add-flow br-int "cookie=0x1, table=L3Forwarding, priority=200,ip,ip,nw_dst=10.244.110.129 actions=mod_dl_src:7a:d4:65:d5:67:c9,mod_dl_dst:aa:bb:cc:dd:ee:ff,load:0xac120004->NXM_NX_TUN_IPV4_DST[],load:0x1->NXM_NX_REG0[4..7],load:0x1->NXM_NX_REG0[19],resubmit(,L2ForwardingCalc)"
+*/
 func (nc *NetworkConfig) NeedsTunnelInterface() bool {
 	// For encap or hybrid mode, we need to create the tunnel interface, except if we are using
 	// WireGuard, in which case inter-Node traffic always goes through the antrea-wg0 interface,
@@ -283,7 +304,7 @@ func (nc *NetworkConfig) NeedsTunnelInterface() bool {
 	// cross-cluster traffic from a regular Node to the gateway Node for the source cluster
 	// always goes through antrea-tun0, regardless of the actual "traffic mode" for the source
 	// cluster.
-	return (nc.TrafficEncapMode.SupportsEncap() && nc.TrafficEncryptionMode != TrafficEncryptionModeWireGuard) || nc.EnableMulticlusterGW
+	return (nc.TrafficEncapMode.SupportsEncap() && nc.TrafficEncryptionMode != TrafficEncryptionModeWireGuard) || nc.EnableMulticlusterGW || nc.TrafficEncapMode == TrafficEncapModeNetworkPolicyOnly
 }
 
 // NeedsDirectRoutingToPeer returns true if Pod traffic to peer Node needs a direct route installed to the routing table.
