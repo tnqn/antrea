@@ -214,6 +214,7 @@ type NetworkConfig struct {
 	IPsecConfig           IPsecConfig
 	TransportIface        string
 	TransportIfaceCIDRs   []string
+	ExternalIface         string
 	IPv4Enabled           bool
 	IPv6Enabled           bool
 	// MTUDeduction is the MTU deduction for encapsulation and encryption in cluster.
