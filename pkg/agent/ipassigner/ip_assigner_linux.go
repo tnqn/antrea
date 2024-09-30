@@ -217,10 +217,11 @@ type ipAssigner struct {
 }
 
 // NewIPAssigner returns an *ipAssigner.
-func NewIPAssigner(nodeTransportInterface string, dummyDeviceName string) (IPAssigner, error) {
-	ipv4, ipv6, externalInterface, err := util.GetIPNetDeviceByName(nodeTransportInterface)
+func NewIPAssigner(externalInterfaceName string, dummyDeviceName string) (IPAssigner, error) {
+	ipv4, ipv6, externalInterface, err := util.GetIPNetDeviceByName(externalInterfaceName)
 	if err != nil {
-		return nil, fmt.Errorf("get IPNetDevice from name %s error: %+v", nodeTransportInterface, err)
+		klog.InfoS("Failed to get external interface", "name", externalInterfaceName, "err", err)
+		return dummyAssigner{}, nil
 	}
 	a := &ipAssigner{
 		externalInterface: externalInterface,
@@ -543,3 +544,33 @@ func getIPNet(ip net.IP, subnetInfo *crdv1b1.SubnetInfo) *net.IPNet {
 	}
 	return &net.IPNet{IP: ip, Mask: net.CIDRMask(ones, bits)}
 }
+
+type dummyAssigner struct{}
+
+func (d dummyAssigner) AssignIP(ip string, subnetInfo *crdv1b1.SubnetInfo, forceAdvertise bool) (bool, error) {
+	klog.InfoS("Assigning IP", "ip", ip, "subnetInfo", subnetInfo, "forceAdvertise", forceAdvertise)
+	return true, nil
+}
+
+func (d dummyAssigner) UnassignIP(ip string) (bool, error) {
+	klog.InfoS("Unassigning IP", "ip", ip)
+	return false, nil
+}
+
+func (d dummyAssigner) AssignedIPs() map[string]*crdv1b1.SubnetInfo {
+	return nil
+}
+
+func (d dummyAssigner) InitIPs(m map[string]*crdv1b1.SubnetInfo) error {
+	return nil
+}
+
+func (d dummyAssigner) GetInterfaceID(subnetInfo *crdv1b1.SubnetInfo) (int, bool) {
+	return 0, false
+}
+
+func (d dummyAssigner) Run(i <-chan struct{}) {
+	klog.InfoS("Running dummyAssigner")
+}
+
+var _ IPAssigner = &dummyAssigner{}

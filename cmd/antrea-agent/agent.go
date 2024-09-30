@@ -568,7 +568,7 @@ func run(o *Options) error {
 	}
 	if o.enableEgress {
 		egressController, err = egress.NewEgressController(
-			ofClient, k8sClient, antreaClientProvider, crdClient, ifaceStore, routeClient, nodeConfig.Name, nodeConfig.NodeTransportInterfaceName,
+			ofClient, k8sClient, antreaClientProvider, crdClient, ifaceStore, routeClient, nodeConfig.Name, o.config.ExternalInterface,
 			memberlistCluster, egressInformer, externalIPPoolInformer, nodeInformer, podUpdateChannel, serviceCIDRProvider, o.config.Egress.MaxEgressIPsPerNode,
 			features.DefaultFeatureGate.Enabled(features.EgressTrafficShaping),
 			features.DefaultFeatureGate.Enabled(features.EgressSeparateSubnet),
@@ -580,7 +580,7 @@ func run(o *Options) error {
 	if features.DefaultFeatureGate.Enabled(features.ServiceExternalIP) {
 		externalIPController, err = serviceexternalip.NewServiceExternalIPController(
 			nodeConfig.Name,
-			nodeConfig.NodeTransportInterfaceName,
+			o.config.ExternalInterface,
 			memberlistCluster,
 			serviceInformer,
 			endpointsInformer,

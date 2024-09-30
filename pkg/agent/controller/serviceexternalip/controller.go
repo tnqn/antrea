@@ -83,7 +83,7 @@ var _ querier.ServiceExternalIPStatusQuerier = (*ServiceExternalIPController)(ni
 
 func NewServiceExternalIPController(
 	nodeName string,
-	nodeTransportInterface string,
+	externalInterfaceName string,
 	cluster memberlist.Interface,
 	serviceInformer coreinformers.ServiceInformer,
 	endpointsInformer coreinformers.EndpointsInformer,
@@ -106,7 +106,7 @@ func NewServiceExternalIPController(
 		externalIPStates:      make(map[apimachinerytypes.NamespacedName]externalIPState),
 		assignedIPs:           make(map[string]sets.Set[string]),
 	}
-	ipAssigner, err := ipassigner.NewIPAssigner(nodeTransportInterface, "")
+	ipAssigner, err := ipassigner.NewIPAssigner(externalInterfaceName, "")
 	if err != nil {
 		return nil, fmt.Errorf("initializing service external IP assigner failed: %v", err)
 	}

@@ -170,6 +170,9 @@ type NodeConfig struct {
 	NodeIPv6Addr *net.IPNet
 	// The name of the Node's transport interface. The transport interface defaults to the interface that has the K8s
 	// Node IP, and can be overridden by the configuration parameters TransportInterface and TransportInterfaceCIDRs.
+	NodeExternalInterfaceName string
+	// The name of the Node's transport interface. The transport interface defaults to the interface that has the K8s
+	// Node IP, and can be overridden by the configuration parameters TransportInterface and TransportInterfaceCIDRs.
 	NodeTransportInterfaceName string
 	// The IPv4 address on the Node's transport interface. It is used for tunneling or routing the Pod traffic across Nodes.
 	NodeTransportIPv4Addr *net.IPNet
