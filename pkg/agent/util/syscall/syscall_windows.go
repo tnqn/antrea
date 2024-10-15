@@ -374,11 +374,7 @@ func (n *netIO) ListIPForwardRows(family uint16) ([]MibIPForwardRow, error) {
 	}
 	defer n.freeMibTable(unsafe.Pointer(table))
 
-	// Copy the rows from the table into a new slice as the table's memory will be freed.
-	// Since MibIPForwardRow contains only value data (no references), the operation performs a deep copy.
-	rows := make([]MibIPForwardRow, 0, table.NumEntries)
-	rows = append(rows, unsafe.Slice(&table.Table[0], table.NumEntries)...)
-	return rows, nil
+	return unsafe.Slice(&table.Table[0], table.NumEntries), nil
 }
 
 func NewIPForwardRow() *MibIPForwardRow {
