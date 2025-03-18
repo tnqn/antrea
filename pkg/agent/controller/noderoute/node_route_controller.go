@@ -634,11 +634,17 @@ func (c *Controller) addNodeRoute(nodeName string, node *corev1.Node) error {
 	}
 
 	if c.networkConfig.TrafficEncryptionMode == config.TrafficEncryptionModeWireGuard && peerWireGuardPublicKey != "" {
-		peerNodeIP := peerNodeIPs.IPv4
-		if peerNodeIP == nil {
+		var peerNodeIP net.IP
+		var allowedIPs []net.IPNet
+		if peerNodeIPs.IPv6 != nil {
 			peerNodeIP = peerNodeIPs.IPv6
+			allowedIPs = append(allowedIPs, *util.NewIPNet(peerNodeIPs.IPv6))
 		}
-		if err := c.wireGuardClient.UpdatePeer(nodeName, peerWireGuardPublicKey, peerNodeIP, peerPodCIDRs); err != nil {
+		if peerNodeIPs.IPv4 != nil {
+			peerNodeIP = peerNodeIPs.IPv4
+			allowedIPs = append(allowedIPs, *util.NewIPNet(peerNodeIPs.IPv4))
+		}
+		if err := c.wireGuardClient.UpdatePeer(nodeName, peerWireGuardPublicKey, peerNodeIP, allowedIPs); err != nil {
 			return err
 		}
 	}

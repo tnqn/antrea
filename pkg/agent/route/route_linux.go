@@ -1112,6 +1112,35 @@ func (c *Client) initIPRoutes() error {
 			}
 		}
 	}
+
+	if c.networkConfig.TrafficEncryptionMode == config.TrafficEncryptionModeWireGuard {
+		_, defaultDst, _ := net.ParseCIDR("0.0.0.0/0")
+		route := &netlink.Route{
+			Dst:       defaultDst,
+			LinkIndex: c.nodeConfig.WireGuardConfig.LinkIndex,
+			Table:     types.WireGuardRouteTable,
+		}
+		if err := c.netlink.RouteReplace(route); err != nil {
+			return fmt.Errorf("failed to install route for WireGuard: %w", err)
+		}
+		rule := netlink.NewRule()
+		// Match packets originating from this host.
+		rule.IifName = "lo"
+		// Match tunnel packets.
+		rule.Protocol = unix.IPPROTO_UDP
+		var udpPort uint16
+		if c.networkConfig.TunnelType == ovsconfig.GeneveTunnel {
+			udpPort = genevePort
+		} else if c.networkConfig.TunnelType == ovsconfig.VXLANTunnel {
+			udpPort = vxlanPort
+		}
+		rule.Dport = netlink.NewRulePortRange(udpPort, udpPort)
+		// Lookup the WireGuard table.
+		rule.Table = types.WireGuardRouteTable
+		if err := c.netlink.RuleAdd(rule); err != nil {
+			return fmt.Errorf("error adding ip rule %v: %w", rule, err)
+		}
+	}
 	return nil
 }
 
@@ -1444,17 +1473,7 @@ func (c *Client) AddRoutes(podCIDR *net.IPNet, nodeName string, nodeIP, nodeGwIP
 	}
 	var routes []*netlink.Route
 	requireNodeGwIPv6RouteAndNeigh := false
-	// If WireGuard is enabled, create a route via WireGuard device regardless of the traffic encapsulation modes.
-	if c.networkConfig.TrafficEncryptionMode == config.TrafficEncryptionModeWireGuard {
-		podCIDRRoute.LinkIndex = c.nodeConfig.WireGuardConfig.LinkIndex
-		podCIDRRoute.Scope = netlink.SCOPE_LINK
-		if podCIDR.IP.To4() != nil {
-			podCIDRRoute.Src = c.nodeConfig.GatewayConfig.IPv4
-		} else {
-			podCIDRRoute.Src = c.nodeConfig.GatewayConfig.IPv6
-		}
-		routes = append(routes, podCIDRRoute)
-	} else if c.networkConfig.NeedsTunnelToPeer(nodeIP, nodeTransportIPAddr) {
+	if c.networkConfig.NeedsTunnelToPeer(nodeIP, nodeTransportIPAddr) {
 		if podCIDR.IP.To4() == nil {
 			requireNodeGwIPv6RouteAndNeigh = true
 			// "on-link" is not identified in IPv6 route entries, so split the configuration into 2 entries.

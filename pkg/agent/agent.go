@@ -1092,7 +1092,14 @@ func (i *Initializer) initializeWireGuard() error {
 	}
 
 	i.wireGuardClient = wgClient
-	publicKey, err := i.wireGuardClient.Init(nil, nil)
+	var nodeIPv4, nodeIPv6 net.IP
+	if i.nodeConfig.NodeIPv4Addr != nil {
+		nodeIPv4 = i.nodeConfig.NodeIPv4Addr.IP
+	}
+	if i.nodeConfig.NodeIPv6Addr != nil {
+		nodeIPv6 = i.nodeConfig.NodeIPv6Addr.IP
+	}
+	publicKey, err := i.wireGuardClient.Init(nodeIPv4, nodeIPv6)
 	if err != nil {
 		return err
 	}

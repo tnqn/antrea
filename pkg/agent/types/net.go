@@ -35,4 +35,6 @@ const (
 	// Each distinct subnet uses one route table. 20 subnets should be enough.
 	MinEgressRouteTable = 101
 	MaxEgressRouteTable = 120
+
+	WireGuardRouteTable = 141
 )

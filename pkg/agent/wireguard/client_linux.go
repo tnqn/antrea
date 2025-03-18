@@ -102,10 +102,13 @@ func (client *client) Init(ipv4 net.IP, ipv6 net.IP) (string, error) {
 	if err := linkSetUp(link); err != nil {
 		return "", err
 	}
+	// Loose mode is needed because ...
+	if err := util.EnsureRPFilterOnInterface(link.Name, 2); err != nil {
+		return "", err
+	}
 	// Configure the IP addresses same as Antrea gateway so iptables MASQUERADE target will select it as source address.
 	// It's necessary to make Service traffic requiring SNAT (e.g. host to ClusterIP, external to NodePort) accepted by
 	// peer Node and to make their response routed back correctly.
-	// If ipv4 or ipv6 is not provided, the IP address from client's Gateway configuration will be used.
 	// It uses "/32" mask for IPv4 address and "/128" mask for IPv6 address to avoid impacting routes on Antrea gateway.
 	var gatewayIPs []*net.IPNet
 	if ipv4 != nil {
@@ -113,20 +116,10 @@ func (client *client) Init(ipv4 net.IP, ipv6 net.IP) (string, error) {
 			IP:   ipv4,
 			Mask: net.CIDRMask(32, 32),
 		})
-	} else if client.gatewayConfig.IPv4 != nil {
-		gatewayIPs = append(gatewayIPs, &net.IPNet{
-			IP:   client.gatewayConfig.IPv4,
-			Mask: net.CIDRMask(32, 32),
-		})
 	}
 	if ipv6 != nil {
 		gatewayIPs = append(gatewayIPs, &net.IPNet{
 			IP:   ipv6,
-			Mask: net.CIDRMask(128, 128),
-		})
-	} else if client.gatewayConfig.IPv6 != nil {
-		gatewayIPs = append(gatewayIPs, &net.IPNet{
-			IP:   client.gatewayConfig.IPv6,
 			Mask: net.CIDRMask(128, 128),
 		})
 	}
@@ -189,19 +182,13 @@ func (client *client) RemoveStalePeers(currentPeerPublickeys map[string]string) 
 	return nil
 }
 
-func (client *client) UpdatePeer(nodeName, publicKeyString string, peerNodeIP net.IP, podCIDRs []*net.IPNet) error {
+func (client *client) UpdatePeer(nodeName, publicKeyString string, peerNodeIP net.IP, allowedIPs []net.IPNet) error {
 	pubKey, err := wgtypes.ParseKey(publicKeyString)
 	if err != nil {
 		return err
 	}
-	var allowedIPs []net.IPNet
-
 	if peerNodeIP.To16() == nil {
 		return fmt.Errorf("peer Node IP is not valid: %s", peerNodeIP.String())
-	}
-
-	for _, cidr := range podCIDRs {
-		allowedIPs = append(allowedIPs, *cidr)
 	}
 
 	if key, exist := client.peerPublicKeyByNodeName.Load(nodeName); exist {

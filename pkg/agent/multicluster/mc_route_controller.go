@@ -15,6 +15,7 @@
 package multicluster
 
 import (
+	"antrea.io/antrea/pkg/agent/util"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -365,11 +366,10 @@ func (c *MCDefaultRouteController) addWireGuardRouteAndPeer(ciImport *mcv1alpha1
 	if err != nil {
 		return err
 	}
-	remoteWireGuardNet := &net.IPNet{IP: remoteWireGuardIP, Mask: net.CIDRMask(32, 32)}
+	remoteWireGuardNet := util.NewIPNet(remoteWireGuardIP)
 
 	gatewayIP := net.ParseIP(ciImport.Spec.GatewayInfos[0].GatewayIP)
-	allowedIPs := []*net.IPNet{remoteWireGuardNet}
-	if err := c.wireGuardClient.UpdatePeer(ciImport.Name, ciImport.Spec.WireGuard.PublicKey, gatewayIP, allowedIPs); err != nil {
+	if err := c.wireGuardClient.UpdatePeer(ciImport.Name, ciImport.Spec.WireGuard.PublicKey, gatewayIP, []net.IPNet{*remoteWireGuardNet}); err != nil {
 		return err
 	}
 
