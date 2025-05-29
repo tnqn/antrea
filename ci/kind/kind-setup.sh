@@ -17,13 +17,17 @@
 # The script creates and deletes kind testbeds. Kind testbeds may be created with
 # docker images preloaded, antrea-cni preloaded, antrea-cni's encapsulation mode,
 # and docker bridge network connecting to worker Node.
+#
+# It supports custom configurations which may create extra bridges and containers,
+# and configure network settings of the host. The script will clean up those extra
+# resourceswhen destroying the cluster. Multiple custom clusters should not
+# co-exist on a single host to avoid resource conflicts.
 
 CLUSTER_NAME=""
 ANTREA_IMAGES="antrea/antrea-agent-ubuntu:latest antrea/antrea-controller-ubuntu:latest"
 IMAGES=$ANTREA_IMAGES
 ANTREA_CNI=false
 ACTION=""
-UNTIL_TIME_IN_MINS=""
 POD_CIDR=""
 SERVICE_CIDR=""
 IP_FAMILY="ipv4"
@@ -81,8 +85,6 @@ where:
   --k8s-version: specify the Kubernetes version of the kind cluster, kind's default K8s version will be used if empty.
   --deploy-external-agnhost: deploy a container running agnhost as an external server for the cluster, default is $DEPLOY_EXTERNAL_AGNHOST.
   --deploy-external-frr: deploy a container running FRR as an external router for the cluster, default is $DEPLOY_EXTERNAL_FRR.
-  --all: delete all kind clusters.
-  --until: delete kind clusters that have been created before the specified duration.
 "
 
 function print_usage {
@@ -113,9 +115,7 @@ function docker_run_with_host_net {
 
 function configure_networks {
   echo "Configuring networks"
-  networks=$(docker network ls -f name=antrea --format '{{.Name}}')
-  networks="$(echo $networks)"
-  if [[ -z $SUBNETS ]] && [[ -z $networks ]]; then
+  if [[ -z $SUBNETS ]]; then
     echo "Using default kind docker network"
     return
   fi
@@ -133,19 +133,12 @@ function configure_networks {
   # remove old networks
   nodes="$(kind get nodes --name $CLUSTER_NAME | grep worker)"
   nodes=$(echo $nodes)
-  networks+=" $CLUSTER_NAME"
-  echo "removing worker nodes $nodes from networks $networks"
-  for n in $networks; do
-    rm_nodes=$(docker network inspect $n --format '{{range $i, $conf:=.Containers}}{{$conf.Name}} {{end}}')
-    for rn in $rm_nodes; do
-      if [[  $nodes =~ $rn ]]; then
-        docker network disconnect $n $rn > /dev/null 2>&1
-        echo "disconnected worker $rn from network $n"
-      fi
-    done
-    if [[ $n != "$CLUSTER_NAME" ]]; then
-      docker network rm $n > /dev/null 2>&1
-      echo "removed network $n"
+  echo "removing worker nodes $nodes from network $CLUSTER_NAME"
+  rm_nodes=$(docker network inspect $n --format '{{range $i, $conf:=.Containers}}{{$conf.Name}} {{end}}')
+  for rn in $rm_nodes; do
+    if [[  $nodes =~ $rn ]]; then
+      docker network disconnect $CLUSTER_NAME $rn > /dev/null 2>&1
+      echo "disconnected worker $rn from network $CLUSTER_NAME"
     fi
   done
 
@@ -462,8 +455,6 @@ EOF
     IMAGE_OPT="--image kindest/node:${K8S_VERSION}"
   fi
 
-  flock ~/.antrea/.clusters.lock --command "echo \"$CLUSTER_NAME $(date +%s)\" >> ~/.antrea/.clusters"
-  rm -rf ~/.antrea/.clusters.lock
   kind create cluster --name $CLUSTER_NAME --config $config_file $IMAGE_OPT
 
   # force coredns to run on control-plane node because it
@@ -513,25 +504,10 @@ EOF
 
 function destroy {
   update_kind_ipam_routes "del"
-  if [[ $UNTIL_TIME_IN_MINS != "" ]]; then
-      if [[ -e ~/.antrea/.clusters ]]; then
-          clean_kind
-      fi
-  else
-      kind delete cluster --name $CLUSTER_NAME
-  fi
+  kind delete cluster --name $CLUSTER_NAME
   destroy_external_servers
   delete_vlan_subnets
   delete_networks
-}
-
-function printUnixTimestamp {
-    runtimeOS="$(uname)"
-    if [[ "$runtimeOS" == "Darwin" ]]; then
-        echo $(date -ju -f "%Y-%m-%dT%H:%M:%SZ" "$1" "+%s")
-    else
-        echo $(date -d "$1" '+%s')
-    fi
 }
 
 function setup_external_servers {
@@ -560,33 +536,6 @@ function destroy_external_servers {
 
   cid=$(docker ps -f name="^antrea-external-frr" --format '{{.ID}}')
   docker rm -f $cid &> /dev/null || true
-}
-
-function clean_kind {
-    echo "=== Cleaning up stale kind clusters ==="
-    (
-      flock -x 200
-
-      current_timestamp=$(date +%s)
-      > ~/.antrea/.clusters.swp
-      while IFS=' ' read -r name creationTimestamp; do
-          if [[ -z "$name" || -z "$creationTimestamp" ]]; then
-              continue
-          fi
-          # Calculate the time difference
-          time_difference=$((current_timestamp - creationTimestamp))
-          # Check if the creation happened more than 1 hour ago (3600 seconds)
-          if (( time_difference > 3600 )); then
-              echo "The creation of $name happened more than 1 hour ago."
-              kind delete cluster --name "$name" || echo "Cluster could not be deleted"
-          else
-              echo "The creation of $name happened within the last hour."
-              echo "$name $creationTimestamp" >> ~/.antrea/.clusters.swp
-          fi
-      done < ~/.antrea/.clusters
-      mv ~/.antrea/.clusters.swp ~/.antrea/.clusters
-    ) 200>>~/.antrea/.clusters.lock
-    rm -rf ~/.antrea/.clusters.lock
 }
 
 if ! command -v kind &> /dev/null
@@ -699,16 +648,6 @@ while [[ $# -gt 0 ]]
       DEPLOY_EXTERNAL_FRR=true
       shift
       ;;
-    --all)
-      add_option "--all" "destroy"
-      CLUSTER_NAME="*"
-      shift
-      ;;
-    --until)
-      add_option "--until" "destroy"
-      UNTIL_TIME_IN_MINS="$2"
-      shift 2
-      ;;
     help)
       print_usage
       exit 0
@@ -736,11 +675,6 @@ for option in "${options[@]}"; do
 
 if (( ${#positional_args[@]} > 1 )); then
     echoerr "Too many positional arguments, only expected one (cluster name)"
-    exit 1
-fi
-
-if (( ${#positional_args[@]} == 1 )) && [[ "$CLUSTER_NAME" == "*" ]]; then
-    echoerr "Cannot specify cluster name when using --all"
     exit 1
 fi
 
